@@ -1,7 +1,7 @@
 @php
     $isEdit = $template->exists;
     $metadata = is_array($template->metadata) ? $template->metadata : [];
-    $templateMediaUrl = $template->media_url ? url('/storage/' . $template->media_url) : null;
+    $templateMediaUrl = $template->resolved_image_url ?? ($template->media_url ? \Illuminate\Support\Facades\Storage::disk('public')->url($template->media_url) : null);
 @endphp
 
 @include('shopify.layout-start', [

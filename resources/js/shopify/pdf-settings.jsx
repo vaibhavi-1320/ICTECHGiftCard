@@ -335,11 +335,9 @@ document.addEventListener('DOMContentLoaded', () => {
     mounts.forEach((mount) => {
         if (!mount) return;
         const config = parseConfig(mount.dataset.config, {});
-        const isPurchased = config.title === 'Gift Cards Purchased';
         createRoot(mount).render(
             <AppProvider i18n={{}}>
                 <BlockStack gap="400">
-                    <DashboardOverview stats={config.stats || {}} />
                     <DashboardControls config={config} />
                     <DashboardTable config={config} />
                 </BlockStack>
@@ -742,17 +740,21 @@ function GiftCardFormIsland({ config }) {
                                 />
                             </Layout.Section>
                         </Layout>
-                        <input type="hidden" name="name" value={name} />
-                    <input type="hidden" name="amount" value={amount} />
-                    <input type="hidden" name="code_prefix" value={codePrefix} />
-                    <input type="hidden" name="validity_days" value={validityDays} />
-                    <input type="hidden" name="template_id" value={templateId} />
-                        <input type="hidden" name="active" value={active ? '1' : '0'} />
-                        <input type="hidden" name="_token" value={config.csrfToken} />
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} />
-                            <Text as="span">Active</Text>
-                        </label>
+                        <Box paddingBlockStart="200">
+                            <BlockStack gap="300">
+                                <input type="hidden" name="name" value={name} />
+                                <input type="hidden" name="amount" value={amount} />
+                                <input type="hidden" name="code_prefix" value={codePrefix} />
+                                <input type="hidden" name="validity_days" value={validityDays} />
+                                <input type="hidden" name="template_id" value={templateId} />
+                                <input type="hidden" name="active" value={active ? '1' : '0'} />
+                                <input type="hidden" name="_token" value={config.csrfToken} />
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} />
+                                    <Text as="span">Active</Text>
+                                </label>
+                            </BlockStack>
+                        </Box>
                     </BlockStack>
                 </Box>
             </Card>

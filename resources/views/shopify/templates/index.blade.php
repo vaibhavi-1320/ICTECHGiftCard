@@ -11,7 +11,7 @@
                 'name' => $template->name,
                 'tag' => $template->tag,
                 'active' => (bool) $template->active,
-                'imageUrl' => $template->media_url ? url('/storage/' . $template->media_url) : null,
+                'imageUrl' => $template->resolved_image_url ?? ($template->media_url ? \Illuminate\Support\Facades\Storage::disk('public')->url($template->media_url) : null),
                 'editUrl' => route('shopify.templates.edit', array_merge(request()->query(), ['templateId' => $template->id]), false),
             ])->values(),
         ])) }}"

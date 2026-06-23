@@ -24,6 +24,7 @@ class GiftCardTemplateController extends Controller
                 ->when($shop?->id, fn ($query, $shopId) => $query->where('shop_id', $shopId))
                 ->latest()
                 ->get()
+                ->map(fn (GiftCardTemplate $template) => $this->attachTemplateImageUrl($template))
             : collect();
 
         return view('shopify.templates.index', [
@@ -55,7 +56,7 @@ class GiftCardTemplateController extends Controller
         return view('shopify.templates.form', [
             'shop' => $this->resolveShop($request->string('shop')->toString()),
             'shopDomain' => $request->string('shop')->toString(),
-            'template' => $template,
+            'template' => $this->attachTemplateImageUrl($template),
         ]);
     }
 
@@ -150,6 +151,16 @@ class GiftCardTemplateController extends Controller
         }
 
         return GiftCardTemplate::query()->find($templateId);
+    }
+
+    private function attachTemplateImageUrl(GiftCardTemplate $template): GiftCardTemplate
+    {
+        $template->setAttribute(
+            'resolved_image_url',
+            $template->media_url ? Storage::disk('public')->url($template->media_url) : null
+        );
+
+        return $template;
     }
 
     public function previewPdf(Request $request, int $templateId)

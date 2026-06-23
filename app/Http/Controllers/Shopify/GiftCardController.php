@@ -200,21 +200,18 @@ class GiftCardController extends Controller
 
     private function syncShopifyProduct(ShopifyService $shopifyService, Shop $shop, GiftCard $giftCard, string $method): void
     {
-        $template = $giftCard->template()->with('media')->first();
-        $imageUrl = $giftCard->image_url
-            ? url('/storage/' . $giftCard->image_url)
-            : ($template?->media?->url ?: null);
+        $template = $giftCard->template()->first();
+        $imageUrl = $giftCard->image_url ? url('/storage/' . $giftCard->image_url) : null;
         $payload = [
             'product' => [
                 'title' => $giftCard->name,
-                'body_html' => $this->buildProductBodyHtml($giftCard, $template),
-                'vendor' => $template?->name ?: 'ICTECHGiftCard',
+                'body_html' => $this->buildProductBodyHtml($giftCard),
+                'vendor' => 'ICTECHGiftCard',
                 'product_type' => 'Gift Card',
                 'status' => $giftCard->active ? 'active' : 'draft',
                 'tags' => collect(array_filter([
                     'gift-card',
                     $giftCard->code_prefix ? 'prefix:' . $giftCard->code_prefix : null,
-                    $template?->tag ? 'template:' . $template->tag : null,
                 ]))->implode(', '),
                 'variants' => [
                     [
@@ -256,7 +253,7 @@ class GiftCardController extends Controller
                 'response' => $response->body(),
             ]);
 
-            $fallbackCreated = $this->createShopifyProductViaGraphql($shopifyService, $shop, $giftCard, $template, $imageUrl);
+            $fallbackCreated = $this->createShopifyProductViaGraphql($shopifyService, $shop, $giftCard, $imageUrl);
             if ($fallbackCreated) {
                 return;
             }
@@ -310,7 +307,7 @@ class GiftCardController extends Controller
         }
     }
 
-    private function buildProductBodyHtml(GiftCard $giftCard, ?GiftCardTemplate $template): string
+    private function buildProductBodyHtml(GiftCard $giftCard): string
     {
         $parts = [
             '<p><strong>Gift Card</strong></p>',
@@ -319,20 +316,10 @@ class GiftCardController extends Controller
             '<p>Validity: ' . (int) ($giftCard->validity_days ?: 365) . ' days</p>',
         ];
 
-        if ($template) {
-            $parts[] = '<p>Template: ' . e($template->name) . '</p>';
-            if ($template->tag) {
-                $parts[] = '<p>Template Tag: ' . e($template->tag) . '</p>';
-            }
-            if ($template->media?->url) {
-                $parts[] = '<p>Template Image: ' . e($template->media->url) . '</p>';
-            }
-        }
-
         return implode('', $parts);
     }
 
-    private function createShopifyProductViaGraphql(ShopifyService $shopifyService, Shop $shop, GiftCard $giftCard, ?GiftCardTemplate $template, ?string $imageUrl): bool
+    private function createShopifyProductViaGraphql(ShopifyService $shopifyService, Shop $shop, GiftCard $giftCard, ?string $imageUrl): bool
     {
         $query = <<<'GQL'
 mutation productCreate($input: ProductInput!) {
@@ -356,14 +343,13 @@ GQL;
         $variables = [
             'input' => [
                 'title' => $giftCard->name,
-                'descriptionHtml' => $this->buildProductBodyHtml($giftCard, $template),
+                'descriptionHtml' => $this->buildProductBodyHtml($giftCard),
                 'productType' => 'Gift Card',
-                'vendor' => $template?->name ?: 'ICTECHGiftCard',
+                'vendor' => 'ICTECHGiftCard',
                 'status' => $giftCard->active ? 'ACTIVE' : 'DRAFT',
                 'tags' => array_values(array_filter([
                     'gift-card',
                     $giftCard->code_prefix ? 'prefix:' . $giftCard->code_prefix : null,
-                    $template?->tag ? 'template:' . $template->tag : null,
                 ])),
                 'variants' => [
                     [
