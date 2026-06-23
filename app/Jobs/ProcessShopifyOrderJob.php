@@ -131,7 +131,7 @@ class ProcessShopifyOrderJob implements ShouldQueue
                 $voucher->sender_name = $senderName ?: ($this->payload['customer']['first_name'] ?? 'Sender');
                 $voucher->personal_message = $personalMessage;
                 $voucher->scheduled_send_date = Carbon::parse($scheduledSendDate)->format('Y-m-d');
-                $voucher->expires_at = now()->addDays($giftCard->validity_days ?: 365)->format('Y-m-d');
+                $voucher->expires_at = now()->addDays((int) ($giftCard->validity_days ?: 365))->format('Y-m-d');
                 $voucher->status = 'unused';
                 $voucher->metadata = array_merge($voucher->metadata ?? [], ['item_index' => $k]);
                 $voucher->save();
