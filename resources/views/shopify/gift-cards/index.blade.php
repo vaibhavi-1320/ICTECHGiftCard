@@ -6,6 +6,7 @@
     <div
         id="giftcards-list-react"
         data-config="{{ e(json_encode([
+            'csrfToken' => csrf_token(),
             'createUrl' => route('shopify.gift-cards.create', request()->query(), false),
             'rows' => $giftCards->map(fn ($giftCard) => [
                 'id' => $giftCard->id,

@@ -607,6 +607,8 @@ function TemplateFormIsland({ config }) {
 
 function GiftCardsList({ config }) {
     const rows = config.rows || [];
+    const [deleteId, setDeleteId] = React.useState(null);
+    const selectedRow = rows.find((row) => String(row.id) === String(deleteId)) || null;
 
     return (
         <AppProvider i18n={{}}>
@@ -649,7 +651,7 @@ function GiftCardsList({ config }) {
                                     <td style={{ padding: '14px 16px', textAlign: 'right' }}>
                                         <InlineStack gap="200" align="end">
                                             <Button url={row.editUrl} size="slim">Edit</Button>
-                                            <Button url={row.deleteUrl} variant="tertiary" size="slim">Delete</Button>
+                                            <Button variant="tertiary" size="slim" onClick={() => setDeleteId(row.id)}>Delete</Button>
                                         </InlineStack>
                                     </td>
                                 </tr>
@@ -657,7 +659,46 @@ function GiftCardsList({ config }) {
                         </tbody>
                     </table>
                 </div>
+                <div style={{ display: 'none' }}>
+                    <form id="gift-card-delete-form" method="POST" action={selectedRow?.deleteUrl || '#'}>
+                        <input type="hidden" name="_token" value={config.csrfToken} />
+                        <input type="hidden" name="_method" value="DELETE" />
+                    </form>
+                </div>
             </Card>
+            {selectedRow ? (
+                <div style={{
+                    position: 'fixed',
+                    inset: 0,
+                    background: 'rgba(0,0,0,0.35)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999,
+                }}>
+                    <Card>
+                        <Box padding="400">
+                            <BlockStack gap="300">
+                                <Text as="h3" variant="headingMd">Delete gift card?</Text>
+                                <Text as="p">This cannot be undone. The matching Shopify product will also be deleted.</Text>
+                                <InlineStack gap="200" align="end">
+                                    <Button onClick={() => setDeleteId(null)}>Cancel</Button>
+                                    <Button
+                                        variant="primary"
+                                        tone="critical"
+                                        onClick={() => {
+                                            const form = document.getElementById('gift-card-delete-form');
+                                            if (form) form.submit();
+                                        }}
+                                    >
+                                        Delete
+                                    </Button>
+                                </InlineStack>
+                            </BlockStack>
+                        </Box>
+                    </Card>
+                </div>
+            ) : null}
         </AppProvider>
     );
 }
@@ -702,10 +743,10 @@ function GiftCardFormIsland({ config }) {
                             </Layout.Section>
                         </Layout>
                         <input type="hidden" name="name" value={name} />
-                        <input type="hidden" name="amount" value={amount} />
-                        <input type="hidden" name="code_prefix" value={codePrefix} />
-                        <input type="hidden" name="validity_days" value={validityDays} />
-                        <input type="hidden" name="template_id" value={templateId} />
+                    <input type="hidden" name="amount" value={amount} />
+                    <input type="hidden" name="code_prefix" value={codePrefix} />
+                    <input type="hidden" name="validity_days" value={validityDays} />
+                    <input type="hidden" name="template_id" value={templateId} />
                         <input type="hidden" name="active" value={active ? '1' : '0'} />
                         <input type="hidden" name="_token" value={config.csrfToken} />
                         <label style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
