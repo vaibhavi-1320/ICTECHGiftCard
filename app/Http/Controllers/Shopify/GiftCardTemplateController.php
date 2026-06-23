@@ -174,10 +174,44 @@ class GiftCardTemplateController extends Controller
         $recipientName = 'John Doe';
         $personalMessage = 'Happy Birthday! Enjoy your gift.';
 
-        $templateMediaUrl = $template->media_url ? url('/storage/' . $template->media_url) : null;
-        $imageHtml = $templateMediaUrl
-            ? '<img src="' . $templateMediaUrl . '" style="max-width:300px;height:auto;" />'
-            : '<div style="width:300px;height:192px;border:1px solid #ccc;background:#eee;text-align:center;line-height:192px;">[Gift Card Image]</div>';
+        $imagePath = $template->media_url ? storage_path('app/public/' . $template->media_url) : null;
+        $imageHtml = '<div style="width:300px;height:192px;border:1px solid #ccc;background:#eee;text-align:center;line-height:192px;">[Gift Card Image]</div>';
+        if ($imagePath && file_exists($imagePath)) {
+            $imageMime = mime_content_type($imagePath) ?: 'image/png';
+            $gdAvailable = extension_loaded('gd');
+
+            if ($gdAvailable) {
+                $imageData = base64_encode(file_get_contents($imagePath));
+                $imageHtml = '<img src="data:' . $imageMime . ';base64,' . $imageData . '" style="max-width:100%;width:300px;height:auto;" />';
+            } else {
+                // GD not available — attempt to convert PNG to JPEG using Python PIL
+                // since Dompdf's CPDF class decodes JPEGs in pure PHP without GD.
+                $tempJpg = tempnam(sys_get_temp_dir(), 'gc_jpg_');
+                $cmd = 'python3 -c "from PIL import Image; Image.open(' . escapeshellarg($imagePath) . ').convert(\'RGB\').save(' . escapeshellarg($tempJpg) . ', \'JPEG\')"' . ' 2>&1';
+                exec($cmd, $output, $returnVar);
+
+                if ($returnVar === 0 && file_exists($tempJpg) && filesize($tempJpg) > 0) {
+                    $imageData = base64_encode(file_get_contents($tempJpg));
+                    @unlink($tempJpg);
+                    $imageHtml = '<img src="data:image/jpeg;base64,' . $imageData
+                               . '" style="max-width:100%;width:300px;height:auto;display:block;margin:0 auto;" />';
+                } else {
+                    // Fallback to a styled CSS gift card tile if Python conversion fails
+                    $color1       = $metadata['custom_color_1'] ?? '#1e3a8a';
+                    $templateName = $template->name ?? 'Gift Card';
+                    $formattedAmt = '$' . number_format((float) $previewPrice, 2);
+                    $imageHtml = '<div style="'
+                        . 'width:300px;height:192px;margin:12px auto;border-radius:12px;'
+                        . 'background:' . $color1 . ';color:#fff;'
+                        . 'display:table;text-align:center;font-family:DejaVu Sans,sans-serif;">'
+                        . '<div style="display:table-cell;vertical-align:middle;">'
+                        . '<div style="font-size:11px;letter-spacing:3px;text-transform:uppercase;opacity:0.7;">Gift Card</div>'
+                        . '<div style="font-size:28px;font-weight:bold;margin:8px 0;">' . htmlspecialchars($formattedAmt) . '</div>'
+                        . '<div style="font-size:12px;letter-spacing:2px;opacity:0.8;">' . htmlspecialchars($templateName) . '</div>'
+                        . '</div></div>';
+                }
+            }
+        }
 
         $replacements = [
             '{{card_lastname}}'  => $recipientName,
@@ -197,8 +231,9 @@ class GiftCardTemplateController extends Controller
         $html = str_replace(array_keys($replacements), array_values($replacements), $html);
 
         $options = new Options();
-        $options->set('isRemoteEnabled', true);
+        $options->set('isRemoteEnabled', false);
         $options->set('isHtml5ParserEnabled', true);
+        $options->set('chroot', base_path());
 
         $dompdf = new Dompdf($options);
         $dompdf->loadHtml('<html><head><style>body { font-family: DejaVu Sans, sans-serif; }</style></head><body>' . $html . '</body></html>');
