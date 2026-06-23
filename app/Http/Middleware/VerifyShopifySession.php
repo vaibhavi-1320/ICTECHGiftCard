@@ -93,20 +93,32 @@ class VerifyShopifySession
                 $grantedScopes = collect($scopesData['access_scopes'] ?? [])->pluck('handle')->toArray();
                 $requiredScopes = config('shopify.scopes');
 
-                $missingScopes = array_diff($requiredScopes, $grantedScopes);
-                if (!empty($missingScopes)) {
-                    $shop->update(['access_token' => null]);
-                    session()->forget(['shopify_shop', 'shopify_token_verified']);
-                    $redirectParams = $request->query();
-                    $redirectParams['shop'] = $shopDomain;
-                    if ($host && !isset($redirectParams['host'])) {
-                        $redirectParams['host'] = $host;
+                $missingScopes = [];
+                foreach ($requiredScopes as $scope) {
+                    if (str_starts_with($scope, 'read_')) {
+                        $writeEquivalent = str_replace('read_', 'write_', $scope);
+                        if (in_array($scope, $grantedScopes) || in_array($writeEquivalent, $grantedScopes)) {
+                            continue;
+                        }
+                    } else {
+                        if (in_array($scope, $grantedScopes)) {
+                            continue;
+                        }
                     }
-                    return redirect()->route('shopify.install', $redirectParams);
+                    $missingScopes[] = $scope;
+                }
+
+                if (!empty($missingScopes)) {
+                    \Illuminate\Support\Facades\Log::warning('VerifyShopifySession: Missing scopes detected.', [
+                        'required' => $requiredScopes,
+                        'granted' => $grantedScopes,
+                        'missing' => $missingScopes
+                    ]);
                 }
 
                 session(['shopify_token_verified' => true]);
             } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('VerifyShopifySession error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
                 $shop->update(['access_token' => null]);
                 session()->forget(['shopify_shop', 'shopify_token_verified']);
                 $redirectParams = $request->query();
