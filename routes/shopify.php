@@ -38,6 +38,10 @@ Route::prefix('/shopify')->name('shopify.')->middleware('shopify.session')->grou
 Route::middleware('shopify.proxy')->group(function (): void {
     Route::get('/storefront/gift-cards', [\App\Http\Controllers\Shopify\StorefrontController::class, 'index'])->name('shopify.storefront.gift-cards');
     Route::get('/gift-cards/storefront/gift-cards', [\App\Http\Controllers\Shopify\StorefrontController::class, 'index']);
+    Route::get('/storefront/preview-pdf', [\App\Http\Controllers\Shopify\StorefrontController::class, 'previewPdf']);
+    Route::get('/gift-cards/storefront/preview-pdf', [\App\Http\Controllers\Shopify\StorefrontController::class, 'previewPdf']);
+    Route::get('/storefront/image', [\App\Http\Controllers\Shopify\StorefrontController::class, 'proxyImage']);
+    Route::get('/gift-cards/storefront/image', [\App\Http\Controllers\Shopify\StorefrontController::class, 'proxyImage']);
 });
 
 Route::post('/webhooks/orders-created', [WebhookController::class, 'ordersCreated'])->middleware('shopify.webhook')->name('shopify.webhooks.orders-created');

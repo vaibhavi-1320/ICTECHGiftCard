@@ -18,6 +18,9 @@ class VerifyShopifyProxy
         $signature = $params['signature'] ?? '';
 
         if (empty($signature)) {
+            if (app()->environment('local')) {
+                return $next($request);
+            }
             return response('Missing app proxy signature.', 401);
         }
 
