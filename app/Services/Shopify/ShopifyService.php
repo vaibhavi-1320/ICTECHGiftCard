@@ -168,6 +168,60 @@ class ShopifyService
     public function createStorefrontResources(Shop $shop): void
     {
         try {
+            // Inject script to customize the Cart page images via active theme asset
+            try {
+                $scriptUrl = url('/js/cart-customizer.js');
+                if (str_starts_with($scriptUrl, 'http://')) {
+                    $scriptUrl = str_replace('http://', 'https://', $scriptUrl);
+                }
+
+                $themesResponse = $this->api($shop, 'GET', 'themes.json');
+                if ($themesResponse->successful()) {
+                    $themes = $themesResponse->json()['themes'] ?? [];
+                    $activeThemeId = null;
+                    foreach ($themes as $theme) {
+                        if (($theme['role'] ?? '') === 'main') {
+                            $activeThemeId = $theme['id'];
+                            break;
+                        }
+                    }
+
+                    if ($activeThemeId) {
+                        $assetResponse = $this->api($shop, 'GET', "themes/{$activeThemeId}/assets.json", [
+                            'asset[key]' => 'layout/theme.liquid'
+                        ]);
+
+                        if ($assetResponse->successful()) {
+                            $asset = $assetResponse->json()['asset'] ?? [];
+                            $value = $asset['value'] ?? '';
+
+                            if (!empty($value)) {
+                                // Clean up any old script injections for cart-customizer.js
+                                $pattern = '/<script[^>]*src="[^"]*\/cart-customizer\.js"[^>]*><\/script>\s*/i';
+                                $value = preg_replace($pattern, '', $value);
+
+                                // Inject the new one right before </body>
+                                $newScriptTag = '<script src="' . htmlspecialchars($scriptUrl) . '" defer="defer"></script>';
+                                if (strpos($value, '</body>') !== false) {
+                                    $value = str_replace('</body>', $newScriptTag . "\n  </body>", $value);
+                                } else {
+                                    $value .= "\n" . $newScriptTag;
+                                }
+
+                                $this->api($shop, 'PUT', "themes/{$activeThemeId}/assets.json", [
+                                    'asset' => [
+                                        'key' => 'layout/theme.liquid',
+                                        'value' => $value
+                                    ]
+                                ]);
+                            }
+                        }
+                    }
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('Failed to inject theme script: ' . $e->getMessage());
+            }
+
             // 1. Check if the Gift Card page exists
             $pagesResponse = $this->api($shop, 'GET', 'pages.json', ['handle' => 'gift-card']);
             $pageExists = false;
@@ -190,14 +244,25 @@ class ShopifyService
                 ->get()
                 ->map(function ($t) {
                     $mediaUrl = $t->media_url;
+                    $dataUri  = null;
+
+                    // Try to read from local disk and convert to base64 data URI
+                    // This eliminates ALL cross-origin/CORS/ngrok issues on the storefront
                     if ($mediaUrl && !str_starts_with($mediaUrl, 'http')) {
-                        $mediaUrl = url('/storage/' . $mediaUrl);
+                        $localPath = storage_path('app/public/' . $mediaUrl);
+                        if (file_exists($localPath)) {
+                            $mime    = mime_content_type($localPath) ?: 'image/png';
+                            $b64     = base64_encode(file_get_contents($localPath));
+                            $dataUri = 'data:' . $mime . ';base64,' . $b64;
+                        }
                     }
+
                     return [
-                        'id' => $t->id,
-                        'name' => $t->name,
-                        'tag' => $t->tag ?: 'Various',
-                        'media_url' => $mediaUrl,
+                        'id'             => $t->id,
+                        'name'           => $t->name,
+                        'tag'            => $t->tag ?: 'Various',
+                        'media_url'      => $dataUri ?: ($mediaUrl ? url('/storage/' . $mediaUrl) : null),
+                        'real_media_url' => $mediaUrl ? url('/storage/' . $mediaUrl) : null,
                     ];
                 });
 
@@ -220,6 +285,7 @@ class ShopifyService
 
             $storefrontText = $shop->getSetting('storefrontText') ?: '<p>Delight your loved ones in just a few clicks! Birthday, Valentine\'s Day, weddings, Christmas... Send a personalized gift card by email to the address of your choice. The amount will then be available as a voucher valid across our entire site.</p>';
 
+            $appUrl = url('/');
             $templatesJson = json_encode($templates);
             $giftCardsJson = json_encode($giftCards);
 
@@ -240,27 +306,28 @@ class ShopifyService
   margin-bottom: 2rem;
 }
 .gc-step-title {
-  font-size: 1.25rem;
+  font-size: 1.05rem !important;
   font-weight: 600;
-  margin-top: 2.5rem;
-  margin-bottom: 1.25rem;
+  margin: 1.5rem 0 1rem 0 !important;
   border-bottom: 2px solid #e5e7eb;
   padding-bottom: 0.5rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  color: #111827;
 }
 .gc-step-num {
-  background: #121212;
-  color: #fff;
+  background: #111827;
+  color: #ffffff;
   border-radius: 50%;
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   font-weight: 700;
+  line-height: 1;
 }
 
 /* ── Step 1: Delivery Method ── */
@@ -366,6 +433,7 @@ class ShopifyService
   width: 100%;
   height: 100%;
   object-fit: cover;
+  pointer-events: none;
 }
 .gc-checkmark-overlay {
   position: absolute;
@@ -376,6 +444,7 @@ class ShopifyService
   justify-content: center;
   opacity: 0;
   transition: opacity 0.2s ease;
+  pointer-events: none;
 }
 .gc-template-item.active .gc-checkmark-overlay {
   opacity: 1;
@@ -583,9 +652,9 @@ class ShopifyService
   </div>
 
   <!-- Step 1: Delivery Method -->
-  <div class="gc-step-title">
+  <h4 class="gc-step-title">
     <span class="gc-step-num">1</span> Select delivery method
-  </div>
+  </h4>
   <div class="gc-delivery-grid">
     <div class="gc-delivery-btn active" data-method="print">
       <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -609,9 +678,9 @@ class ShopifyService
   </div>
 
   <!-- Step 2: Select Template -->
-  <div class="gc-step-title">
+  <h4 class="gc-step-title">
     <span class="gc-step-num">2</span> Select a template
-  </div>
+  </h4>
   <div class="gc-tabs" id="gc-tag-tabs">
     <!-- Tabs will be rendered here dynamically -->
   </div>
@@ -620,9 +689,9 @@ class ShopifyService
   </div>
 
   <!-- Step 3: Gift Card Information -->
-  <div class="gc-step-title">
+  <h4 class="gc-step-title">
     <span class="gc-step-num">3</span> Gift Card Information
-  </div>
+  </h4>
   
   <div class="gc-form-layout">
     <div class="gc-form-fields">
@@ -697,9 +766,11 @@ class ShopifyService
   var state = {
     templates: {$templatesJson},
     giftCards: {$giftCardsJson},
+    appUrl: '{$appUrl}',
     selectedDelivery: 'print',
     selectedTemplateId: null,
     selectedTemplateUrl: '',
+    selectedTemplateRealUrl: '',
     selectedTemplateName: '',
     selectedAmount: 0,
     selectedVariantId: null
@@ -802,9 +873,14 @@ class ShopifyService
       item.setAttribute('data-tag', t.tag);
 
       var img = document.createElement('img');
-      img.src = t.media_url || 'https://via.placeholder.com/300x192?text=Template';
       img.alt = t.name;
       img.loading = 'lazy';
+      img.style.width = '100%';
+      img.style.height = '100%';
+      img.style.objectFit = 'cover';
+      img.style.display = 'block';
+      // media_url is a base64 data URI embedded in JS state — set directly, no network request
+      img.src = t.media_url || 'https://via.placeholder.com/300x192?text=Template';
 
       var overlay = document.createElement('div');
       overlay.className = 'gc-checkmark-overlay';
@@ -835,11 +911,15 @@ class ShopifyService
     var t = state.templates.find(item => item.id === id);
     if (t) {
       state.selectedTemplateUrl = t.media_url;
+      state.selectedTemplateRealUrl = t.real_media_url;
       state.selectedTemplateName = t.name;
       
       var card = document.getElementById('gc-preview-card');
       if (t.media_url) {
-        card.style.backgroundImage = 'linear-gradient(rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.35)), url("' + t.media_url + '")';
+        // media_url is a base64 data URI — assign directly, instant display with no CORS/ngrok issues
+        card.style.backgroundImage = 'linear-gradient(rgba(0,0,0,0.35),rgba(0,0,0,0.35)),url("' + t.media_url + '")';
+        card.style.backgroundSize = 'cover';
+        card.style.backgroundPosition = 'center';
       } else {
         card.style.backgroundImage = 'linear-gradient(135deg, #1e3a8a 0%, #0d9488 100%)';
       }
@@ -939,8 +1019,8 @@ class ShopifyService
         props['Recipient Email'] = document.getElementById('gc-field-email').value.trim();
       }
 
-      if (state.selectedTemplateUrl) {
-        props['Template Image'] = state.selectedTemplateUrl;
+      if (state.selectedTemplateRealUrl) {
+        props['Template Image'] = state.selectedTemplateRealUrl;
       }
 
       var msg = document.getElementById('gc-field-message').value.trim();
@@ -969,9 +1049,26 @@ class ShopifyService
       });
     });
 
-    // Preview Button (Mock or just showing message)
+    // Preview PDF Button
     document.getElementById('gc-preview-btn').addEventListener('click', function() {
-      alert('Your PDF preview will look like the card in the preview panel, with your personal message on it.');
+      if (!validateForm()) {
+        return;
+      }
+      
+      var sender = document.getElementById('gc-field-sender').value.trim();
+      var recipient = document.getElementById('gc-field-recipient').value.trim();
+      var message = document.getElementById('gc-field-message').value.trim();
+      var shop = (window.Shopify && Shopify.shop) || window.location.hostname;
+      
+      var previewUrl = state.appUrl + '/gift-cards/storefront/preview-pdf' +
+        '?amount=' + encodeURIComponent(state.selectedAmount) +
+        '&sender=' + encodeURIComponent(sender) +
+        '&recipient=' + encodeURIComponent(recipient) +
+        '&message=' + encodeURIComponent(message) +
+        '&template_id=' + (state.selectedTemplateId || '') +
+        '&shop=' + encodeURIComponent(shop);
+        
+      window.open(previewUrl, '_blank');
     });
   }
 
