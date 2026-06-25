@@ -66,6 +66,14 @@ class GiftCardTemplateController extends Controller
         $this->fillTemplateFromRequest($request, $template);
         $template->save();
 
+        if ($shop = $this->resolveShop($request->string('shop')->toString())) {
+            try {
+                app(\App\Services\Shopify\ShopifyService::class)->createStorefrontResources($shop);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('Failed to sync storefront resources after template creation: ' . $e->getMessage());
+            }
+        }
+
         return redirect()->route('shopify.templates.index', $request->query())->with('status', 'Template created.');
     }
 
@@ -79,6 +87,14 @@ class GiftCardTemplateController extends Controller
 
         $this->fillTemplateFromRequest($request, $template);
         $template->save();
+
+        if ($shop = $this->resolveShop($request->string('shop')->toString())) {
+            try {
+                app(\App\Services\Shopify\ShopifyService::class)->createStorefrontResources($shop);
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('Failed to sync storefront resources after template update: ' . $e->getMessage());
+            }
+        }
 
         return redirect()->route('shopify.templates.index', $request->query())->with('status', 'Template updated.');
     }

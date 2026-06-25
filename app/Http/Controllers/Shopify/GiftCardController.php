@@ -81,6 +81,12 @@ class GiftCardController extends Controller
 
         // Generate voucher pool
         $this->generateVoucherPool($giftCard);
+
+        try {
+            $shopifyService->createStorefrontResources($shop);
+        } catch (\Throwable $e) {
+            Log::error('Failed to sync storefront resources after gift card creation: ' . $e->getMessage());
+        }
  
         return redirect()->route('shopify.gift-cards.index', $request->query())
             ->with('status', 'Gift card created.');
@@ -108,6 +114,14 @@ class GiftCardController extends Controller
                 // Ignore errors during sync to prevent app crash
             }
         }
+
+        if ($shop) {
+            try {
+                $shopifyService->createStorefrontResources($shop);
+            } catch (\Throwable $e) {
+                Log::error('Failed to sync storefront resources after gift card update: ' . $e->getMessage());
+            }
+        }
  
         return redirect()->route('shopify.gift-cards.index', $request->query())
             ->with('status', 'Gift card updated.');
@@ -126,6 +140,14 @@ class GiftCardController extends Controller
         }
  
         $giftCard->delete();
+
+        if ($shop) {
+            try {
+                $shopifyService->createStorefrontResources($shop);
+            } catch (\Throwable $e) {
+                Log::error('Failed to sync storefront resources after gift card delete: ' . $e->getMessage());
+            }
+        }
  
         return redirect()->route('shopify.gift-cards.index', $request->query())
             ->with('status', 'Gift card deleted.');
@@ -223,6 +245,14 @@ class GiftCardController extends Controller
                         'taxable' => false,
                     ],
                 ],
+                'metafields' => [
+                    [
+                        'namespace' => 'seo',
+                        'key' => 'hidden',
+                        'value' => 1,
+                        'type' => 'integer',
+                    ],
+                ],
             ],
         ];
 
@@ -240,7 +270,7 @@ class GiftCardController extends Controller
                             'image' => ['src' => $imageUrl],
                         ]);
                     } catch (\Throwable $imageError) {
-                        \Log::warning('Gift card product image sync failed', [
+                        Log::warning('Gift card product image sync failed', [
                             'gift_card_id' => $giftCard->id,
                             'product_id' => $giftCard->shopify_product_id,
                             'error' => $imageError->getMessage(),
@@ -368,6 +398,14 @@ GQL;
                 'variants' => [
                     [
                         'price' => number_format((float) $giftCard->amount, 2, '.', ''),
+                    ],
+                ],
+                'metafields' => [
+                    [
+                        'namespace' => 'seo',
+                        'key' => 'hidden',
+                        'value' => '1',
+                        'type' => 'integer',
                     ],
                 ],
             ],
