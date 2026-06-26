@@ -18,42 +18,61 @@
         </div>
 
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 30px;">
-            @forelse ($activeGiftCards as $card)
+            @forelse ($templates as $template)
                 <div style="border: 1px solid #e5e7eb; border-radius: 12px; overflow: hidden; background: #fff; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03); transition: transform 0.2s ease, box-shadow 0.2s ease; cursor: pointer;" 
                      onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 10px 15px -3px rgba(0,0,0,0.1)';" 
                      onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px -1px rgba(0,0,0,0.05)';"
-                     onclick="openPersonalization('{{ $card->id }}')">
+                     onclick="openPersonalization('{{ $template['id'] }}')">
                     
                     <div style="position: relative; height: 180px; background: #f3f4f6; overflow: hidden;">
-                        @if ($card->image_url)
-                            <img src="{{ url('/storage/' . $card->image_url) }}" style="width: 100%; height: 100%; object-fit: cover;" alt="{{ $card->name }}">
+                        @if ($template['media_url'])
+                            <img src="{{ url('/storage/' . $template['media_url']) }}" style="width: 100%; height: 100%; object-fit: cover;" alt="{{ $template['name'] }}">
                         @else
                             <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af;">
-                                <svg style="width: 48px; height: 48px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5a2 2 0 10-2 2h2zm-2 4h4m8 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                <img src="{{ url('/images/default-gift-card.png') }}" style="width: 100%; height: 100%; object-fit: cover;" alt="Default Gift Card">
                             </div>
                         @endif
                     </div>
 
                     <div style="padding: 20px;">
-                        <h3 style="font-size: 18px; font-weight: 700; color: #1f2937; margin: 0 0 5px;">{{ $card->name }}</h3>
-                        <p style="font-size: 20px; font-weight: 800; color: #4f46e5; margin: 0 0 15px;">${{ number_format($card->amount, 2) }}</p>
+                        <h3 style="font-size: 18px; font-weight: 700; color: #1f2937; margin: 0 0 5px;">{{ $template['name'] }}</h3>
+                        <p style="font-size: 14px; color: #6b7280; margin: 0 0 15px;">
+                            Available: 
+                            @foreach ($template['amounts'] as $index => $amt)
+                                {{ $index > 0 ? ', ' : '' }}<span class="currency-symbol">$</span>{{ number_format($amt['amount'], 2) }}
+                            @endforeach
+                        </p>
                         <button style="width: 100%; padding: 10px; background: #4f46e5; color: #fff; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#4338ca'" onmouseout="this.style.background='#4f46e5'">
                             Customize & Purchase
                         </button>
                     </div>
                 </div>
 
-                <!-- Personalization Form Modal for each card -->
-                <div id="modal-{{ $card->id }}" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center; padding: 20px;">
+                <!-- Personalization Form Modal for each template -->
+                <div id="modal-{{ $template['id'] }}" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; align-items: center; justify-content: center; padding: 20px;">
                     <div style="background: #fff; border-radius: 16px; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; padding: 30px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); position: relative;" onclick="event.stopPropagation()">
-                        <button onclick="closePersonalization('{{ $card->id }}')" style="position: absolute; top: 15px; right: 15px; border: none; background: none; font-size: 24px; cursor: pointer; color: #9ca3af;">&times;</button>
+                        <button onclick="closePersonalization('{{ $template['id'] }}')" style="position: absolute; top: 15px; right: 15px; border: none; background: none; font-size: 24px; cursor: pointer; color: #9ca3af;">&times;</button>
                         
                         <h3 style="font-size: 22px; font-weight: 800; color: #111827; margin: 0 0 10px;">Personalize Your Gift Card</h3>
-                        <p style="color: #6b7280; font-size: 14px; margin: 0 0 20px;">For: <strong>{{ $card->name }} - ${{ number_format($card->amount, 2) }}</strong></p>
+                        <p style="color: #6b7280; font-size: 14px; margin: 0 0 20px;">Design: <strong>{{ $template['name'] }}</strong></p>
 
                         <form action="/cart/add" method="post" enctype="multipart/form-data">
-                            <input type="hidden" name="id" value="{{ $card->shopify_product_variant_id }}">
+                            <input type="hidden" id="variant-id-{{ $template['id'] }}" name="id" value="{{ $template['amounts'][0]['variant_id'] }}">
                             <input type="hidden" name="quantity" value="1">
+
+                            <div style="margin-bottom: 20px;">
+                                <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 8px;">Select Amount *</label>
+                                <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                                    @foreach ($template['amounts'] as $index => $amt)
+                                        <button type="button" 
+                                                class="amount-btn-{{ $template['id'] }}" 
+                                                onclick="selectAmount('{{ $template['id'] }}', '{{ $amt['variant_id'] }}', '{{ $amt['amount'] }}', this)"
+                                                style="padding: 8px 16px; font-size: 14px; font-weight: 600; border: 2px solid {{ $index === 0 ? '#4f46e5' : '#d1d5db' }}; border-radius: 20px; cursor: pointer; transition: all 0.2s; background: {{ $index === 0 ? '#4f46e5' : '#f9fafb' }}; color: {{ $index === 0 ? '#fff' : '#374151' }};">
+                                            <span class="currency-symbol">$</span>{{ number_format($amt['amount'], 2) }}
+                                        </button>
+                                    @endforeach
+                                </div>
+                            </div>
 
                             <div style="margin-bottom: 15px;">
                                 <label style="display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 5px;">Recipient Name *</label>
@@ -126,10 +145,10 @@
                                     {{ $v->code }}
                                 </td>
                                 <td style="padding: 16px; color: #374151;">
-                                    ${{ number_format($v->original_amount, 2) }}
+                                    <span class="currency-symbol">$</span>{{ number_format($v->original_amount, 2) }}
                                 </td>
                                 <td style="padding: 16px; font-weight: 600; color: {{ $v->remaining_balance > 0 ? '#10b981' : '#9ca3af' }};">
-                                    ${{ number_format($v->remaining_balance, 2) }}
+                                    <span class="currency-symbol">$</span>{{ number_format($v->remaining_balance, 2) }}
                                 </td>
                                 <td style="padding: 16px;">
                                     <span style="display: inline-block; padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; text-transform: uppercase; background: {{ $v->status === 'unused' ? '#d1fae5' : ($v->status === 'used' ? '#fee2e2' : '#fef3c7') }}; color: {{ $v->status === 'unused' ? '#065f46' : ($v->status === 'used' ? '#991b1b' : '#92400e') }};">
@@ -178,18 +197,36 @@ function switchStorefrontTab(tab) {
     }
 }
 
-function openPersonalization(cardId) {
-    const modal = document.getElementById('modal-' + cardId);
+function openPersonalization(templateId) {
+    const modal = document.getElementById('modal-' + templateId);
     if (modal) {
         modal.style.display = 'flex';
     }
 }
 
-function closePersonalization(cardId) {
-    const modal = document.getElementById('modal-' + cardId);
+function closePersonalization(templateId) {
+    const modal = document.getElementById('modal-' + templateId);
     if (modal) {
         modal.style.display = 'none';
     }
+}
+
+function selectAmount(templateId, variantId, amount, btnElement) {
+    const hiddenInput = document.getElementById('variant-id-' + templateId);
+    if (hiddenInput) {
+        hiddenInput.value = variantId;
+    }
+
+    const buttons = document.querySelectorAll('.amount-btn-' + templateId);
+    buttons.forEach(btn => {
+        btn.style.background = '#f9fafb';
+        btn.style.color = '#374151';
+        btn.style.borderColor = '#d1d5db';
+    });
+
+    btnElement.style.background = '#4f46e5';
+    btnElement.style.color = '#fff';
+    btnElement.style.borderColor = '#4f46e5';
 }
 
 // Close modals when clicking outside
@@ -201,4 +238,18 @@ window.addEventListener('click', function(event) {
         }
     });
 });
+
+// Update currency symbols dynamically from Shopify context if available
+(function() {
+    function applyCurrency() {
+        const symbol = (window.Shopify && window.Shopify.currency && window.Shopify.currency.symbol) || '$';
+        document.querySelectorAll('.currency-symbol').forEach(el => {
+            el.textContent = symbol;
+        });
+    }
+    applyCurrency();
+    document.addEventListener('DOMContentLoaded', applyCurrency);
+    setTimeout(applyCurrency, 500);
+    setTimeout(applyCurrency, 1500);
+})();
 </script>

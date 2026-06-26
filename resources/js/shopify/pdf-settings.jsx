@@ -877,7 +877,10 @@ function GiftCardFormIsland({ config }) {
     const [amount, setAmount] = React.useState(config.amount || '');
     const [codePrefix, setCodePrefix] = React.useState(config.codePrefix || '');
     const [validityDays, setValidityDays] = React.useState(config.validityDays || 365);
-    const [templateId, setTemplateId] = React.useState(String(config.templateId || ''));
+    
+    const templatesList = config.templates || [];
+    const defaultTemplateId = templatesList.length > 0 ? String(templatesList[0].id) : '';
+    const [templateId, setTemplateId] = React.useState(String(config.templateId || defaultTemplateId));
     const [active, setActive] = React.useState(Boolean(config.active));
 
     return (
@@ -902,10 +905,7 @@ function GiftCardFormIsland({ config }) {
                             <Layout.Section variant="oneHalf">
                                 <Select
                                     label="Template"
-                                    options={[
-                                        { label: 'None', value: '' },
-                                        ...(config.templates || []).map((template) => ({ label: template.name, value: String(template.id) })),
-                                    ]}
+                                    options={templatesList.map((template) => ({ label: template.name, value: String(template.id) }))}
                                     value={templateId}
                                     onChange={setTemplateId}
                                 />
