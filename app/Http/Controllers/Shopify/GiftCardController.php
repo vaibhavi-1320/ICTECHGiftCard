@@ -40,6 +40,7 @@ class GiftCardController extends Controller
 
         $giftCards = Schema::hasTable('gift_cards')
             ? GiftCard::query()
+                ->with('template')
                 ->when($shop?->id, fn ($query, $shopId) => $query->where('shop_id', $shopId))
                 ->latest()
                 ->get()

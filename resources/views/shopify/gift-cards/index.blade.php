@@ -15,6 +15,7 @@
                 'codePrefix' => $giftCard->code_prefix,
                 'validityDays' => $giftCard->validity_days ?: 365,
                 'active' => (bool) $giftCard->active,
+                'templateName' => $giftCard->template?->name ?: 'None',
                 'editUrl' => route('shopify.gift-cards.edit', array_merge(request()->query(), ['giftCard' => $giftCard->id]), false),
                 'deleteUrl' => route('shopify.gift-cards.destroy', array_merge(request()->query(), ['giftCard' => $giftCard->id]), false),
             ])->values(),
