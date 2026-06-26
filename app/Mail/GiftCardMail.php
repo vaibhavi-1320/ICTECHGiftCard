@@ -38,18 +38,38 @@ class GiftCardMail extends Mailable
     {
         $giftCard = $this->voucher->giftCard;
         $template = $giftCard?->template;
-        $shop = $giftCard?->shop;
+        $shop     = $giftCard?->shop;
+        $metadata = $this->voucher->metadata ?? [];
 
         $html = $template?->body_html ?: ($shop ? $shop->getSetting('pdfContent') : '');
 
         if (empty($html)) {
-            $html = '<p>You have received a gift card code: <strong>{{card_code}}</strong> for <strong>{{card_price}}</strong>.</p>';
+            $html = '<p>Hi {{card_lastname}},</p>'
+                  . '<p>You have received a <strong>{{card_price}}</strong> Gift Card from <strong>{{card_from}}</strong>!</p>'
+                  . '{{card_image}}'
+                  . '<p><strong>Your Code: {{card_code}}</strong></p>'
+                  . '<p>Valid until: {{validity_date}}</p>'
+                  . '<p>{{card_message}}</p>';
         }
 
-        $templateMediaUrl = $template?->media_url ? Storage::disk('public')->url($template->media_url) : null;
+        // Resolve template image: prefer relationship, fall back to metadata URL
+        $templateImagePath = $metadata['template_image_url'] ?? null;
+        $templateMediaUrl  = null;
+
+        if ($template?->media_url) {
+            $templateMediaUrl = Storage::disk('public')->url($template->media_url);
+        } elseif ($templateImagePath) {
+            // Could be a relative path like gift-card-templates/xxx.png
+            if (filter_var($templateImagePath, FILTER_VALIDATE_URL)) {
+                $templateMediaUrl = $templateImagePath;
+            } else {
+                $templateMediaUrl = Storage::disk('public')->url($templateImagePath);
+            }
+        }
+
         $imageHtml = $templateMediaUrl
-            ? '<img src="' . $templateMediaUrl . '" style="max-width:300px;height:auto;" />'
-            : '<div style="width:300px;height:192px;border:1px solid #ccc;background:#eee;text-align:center;line-height:192px;">[Gift Card Image]</div>';
+            ? '<img src="' . $templateMediaUrl . '" style="max-width:400px;width:100%;height:auto;border-radius:8px;display:block;margin:16px auto;" />'
+            : '';
 
         $replacements = [
             '{{card_lastname}}'  => $this->voucher->recipient_name,
@@ -57,7 +77,7 @@ class GiftCardMail extends Mailable
             '{{card_price}}'     => '$' . number_format((float) $this->voucher->original_amount, 2),
             '{{card_from}}'      => $this->voucher->sender_name ?: 'A Friend',
             '{{card_code}}'      => $this->voucher->code,
-            '{{card_message}}'   => $this->voucher->personal_message ?: '',
+            '{{card_message}}'   => nl2br(htmlspecialchars($this->voucher->personal_message ?: '')),
             '{{card_image}}'     => $imageHtml,
             '{{shop_name}}'      => $shop ? $shop->shopify_domain : 'My Store',
             '{{validity_date}}'  => $this->voucher->expires_at?->format('d.m.Y') ?? '',

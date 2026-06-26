@@ -2,7 +2,7 @@
 
 client_id = "352afc14d1dadbcc5d6e3c5af3c66beb"
 name = "GiftCard"
-application_url = "https://crawlier-darlene-unimpearled.ngrok-free.dev"
+application_url = "https://starlet-savanna-enjoyer.ngrok-free.dev"
 embedded = true
 
 [build]
@@ -33,6 +33,6 @@ use_legacy_install_flow = false
 redirect_urls = [ ]
 
 [app_proxy]
-url = "https://crawlier-darlene-unimpearled.ngrok-free.dev/gift-cards"
+url = "https://starlet-savanna-enjoyer.ngrok-free.dev/gift-cards"
 subpath = "gift-cards"
 prefix = "apps"

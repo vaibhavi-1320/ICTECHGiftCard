@@ -82,6 +82,12 @@ class SettingsController extends Controller
         $shop->metadata = $metadata;
         $shop->save();
 
+        try {
+            app(\App\Services\Shopify\ShopifyService::class)->createStorefrontResources($shop);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Failed to sync storefront resources after settings update: ' . $e->getMessage());
+        }
+
         return redirect()->route('shopify.settings.edit', $request->query())
             ->with('status', 'Settings updated.');
     }

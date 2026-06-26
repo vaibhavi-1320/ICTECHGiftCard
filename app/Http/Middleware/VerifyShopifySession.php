@@ -56,7 +56,10 @@ class VerifyShopifySession
             // Stale hmac params from Shopify Admin URL persist across internal navigation
             // and will fail verification since they were computed for a different URL.
             if (!$isSessionValid) {
-                if ($this->shopifyService->verifyCallback($request->query())) {
+                $shopifyParams = array_filter($request->query(), function ($key) {
+                    return !str_starts_with($key, 'p_') && !str_starts_with($key, 'u_');
+                }, ARRAY_FILTER_USE_KEY);
+                if ($this->shopifyService->verifyCallback($shopifyParams)) {
                     session(['shopify_shop' => $shopDomain]);
                     $isSessionValid = true;
                 } else {
@@ -109,11 +112,19 @@ class VerifyShopifySession
                 }
 
                 if (!empty($missingScopes)) {
-                    \Illuminate\Support\Facades\Log::warning('VerifyShopifySession: Missing scopes detected.', [
+                    \Illuminate\Support\Facades\Log::warning('VerifyShopifySession: Missing scopes detected. Re-triggering OAuth.', [
                         'required' => $requiredScopes,
                         'granted' => $grantedScopes,
                         'missing' => $missingScopes
                     ]);
+                    $shop->update(['access_token' => null]);
+                    session()->forget(['shopify_shop', 'shopify_token_verified']);
+                    $redirectParams = $request->query();
+                    $redirectParams['shop'] = $shopDomain;
+                    if ($host && !isset($redirectParams['host'])) {
+                        $redirectParams['host'] = $host;
+                    }
+                    return redirect()->route('shopify.install', $redirectParams);
                 }
 
                 session(['shopify_token_verified' => true]);

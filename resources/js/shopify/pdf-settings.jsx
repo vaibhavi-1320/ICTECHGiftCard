@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { AppProvider, Badge, Card, Button, ButtonGroup, Select, TextField, BlockStack, InlineStack, Box, Text, Tabs, Layout, Divider } from '@shopify/polaris';
+import { AppProvider, Badge, Card, Button, ButtonGroup, Select, TextField, BlockStack, InlineStack, Box, Text, Tabs, Layout, Divider, Pagination } from '@shopify/polaris';
 
 function parseConfig(raw, fallback = {}) {
     if (!raw) return fallback;
@@ -102,30 +102,59 @@ document.addEventListener('DOMContentLoaded', () => {
     createRoot(mount).render(<PdfSettingsIsland settings={settings} shopDomain={shopDomain} />);
 });
 
-function DashboardOverview({ stats }) {
+function DashboardOverview({ stats: initialStats }) {
+    const [stats, setStats] = React.useState(initialStats);
+    const [hoveredCardIndex, setHoveredCardIndex] = React.useState(null);
+
+    React.useEffect(() => {
+        const handleUpdate = (event) => {
+            if (event.detail) {
+                setStats(event.detail);
+            }
+        };
+        window.addEventListener('update-dashboard-stats', handleUpdate);
+        return () => window.removeEventListener('update-dashboard-stats', handleUpdate);
+    }, []);
+
     const cards = [
         { label: 'Total Vouchers', value: stats.totalVouchers, tone: 'base' },
         { label: 'Pending Issuance', value: stats.pendingVouchers, tone: 'attention' },
         { label: 'Expired Vouchers', value: stats.expiredVouchers, tone: 'critical' },
         { label: 'Total Sold', value: `$${Number(stats.totalSold || 0).toFixed(2)}`, tone: 'success' },
         { label: 'Total Redeemed', value: `$${Number(stats.redeemedAmount || 0).toFixed(2)}`, tone: 'info' },
-        { label: 'App Status', value: 'Connected & Active', tone: 'success' },
+        { label: 'App Status', value: 'Active', tone: 'success' },
     ];
 
     return (
         <AppProvider i18n={{}}>
             <BlockStack gap="400">
                 <Text as="h2" variant="headingMd">Overview Statistics</Text>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-                    {cards.map((card) => (
-                        <Card key={card.label}>
-                            <Box padding="400">
-                                <BlockStack gap="100">
-                                    <Text as="p" variant="bodySm" tone="subdued">{card.label}</Text>
-                                    <Text as="p" variant="headingLg" tone={card.tone === 'success' ? 'success' : 'base'}>{card.value}</Text>
-                                </BlockStack>
-                            </Box>
-                        </Card>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px' }}>
+                    {cards.map((card, index) => (
+                        <div
+                            key={card.label}
+                            onMouseEnter={() => setHoveredCardIndex(index)}
+                            onMouseLeave={() => setHoveredCardIndex(null)}
+                            style={{
+                                transform: hoveredCardIndex === index ? 'translateY(-5px)' : 'translateY(0)',
+                                boxShadow: hoveredCardIndex === index 
+                                    ? '0 10px 20px rgba(0, 0, 0, 0.08), 0 2px 6px rgba(0, 0, 0, 0.04)' 
+                                    : '0 1px 3px rgba(0, 0, 0, 0.05)',
+                                transition: 'transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.25s cubic-bezier(0.25, 0.8, 0.25, 1)',
+                                borderRadius: 'var(--p-border-radius-200)',
+                                display: 'flex',
+                                flexDirection: 'column'
+                            }}
+                        >
+                            <Card>
+                                <Box padding="400">
+                                    <BlockStack gap="100">
+                                        <Text as="p" variant="bodySm" tone="subdued">{card.label}</Text>
+                                        <Text as="p" variant="headingLg" tone={card.tone === 'success' ? 'success' : 'base'}>{card.value}</Text>
+                                    </BlockStack>
+                                </Box>
+                            </Card>
+                        </div>
                     ))}
                 </div>
             </BlockStack>
@@ -133,40 +162,45 @@ function DashboardOverview({ stats }) {
     );
 }
 
-function DashboardControls({ config }) {
+function DashboardControls({ config, onFilterChange }) {
     const [values, setValues] = React.useState(config.filters || {});
+
+    // Debounce search input
+    React.useEffect(() => {
+        const handler = setTimeout(() => {
+            const isOrders = config.title === 'Gift Card Orders';
+            const searchVal = values.search || '';
+            const configSearchVal = config.filters?.search || '';
+            if (isOrders && searchVal !== configSearchVal) {
+                onFilterChange(values);
+            }
+        }, 500);
+        return () => clearTimeout(handler);
+    }, [values.search]);
+
+    // Handle dropdown/date changes immediately
+    React.useEffect(() => {
+        const isOrders = config.title === 'Gift Card Orders';
+        const statusChanged = isOrders && (values.status || '') !== (config.filters?.status || '');
+        const fromChanged = (values.from || '') !== (config.filters?.from || '');
+        const toChanged = (values.to || '') !== (config.filters?.to || '');
+
+        if (statusChanged || fromChanged || toChanged) {
+            onFilterChange(values);
+        }
+    }, [values.status, values.from, values.to]);
+
+    const reset = () => {
+        const defaultFilters = config.title === 'Gift Card Orders'
+            ? { search: '', status: '', from: '', to: '' }
+            : { from: '', to: '' };
+        setValues(defaultFilters);
+        onFilterChange(defaultFilters);
+    };
 
     const submit = (event) => {
         event.preventDefault();
-        const url = new URL(window.location.href);
-        const params = new URLSearchParams(url.search);
-
-        Object.entries(config.preserved || {}).forEach(([key, value]) => {
-            if (value === null || value === undefined || value === '') {
-                params.delete(key);
-            } else {
-                params.set(key, value);
-            }
-        });
-
-        Object.entries(values).forEach(([key, value]) => {
-            if (value === null || value === undefined || value === '') {
-                params.delete(key === 'status' ? 'p_status' : `u_${key}`);
-            } else {
-                params.set(key === 'status' ? 'p_status' : `u_${key}`, value);
-            }
-        });
-
-        params.set('shop', config.shop || '');
-        if (config.host) {
-            params.set('host', config.host);
-        }
-
-        window.location.href = `${url.pathname}?${params.toString()}`;
-    };
-
-    const reset = () => {
-        window.location.href = config.resetUrl;
+        onFilterChange(values);
     };
 
     return (
@@ -180,18 +214,23 @@ function DashboardControls({ config }) {
             <Box padding="400" borderBlockStartWidth="025" borderColor="border-subdued">
                 <form onSubmit={submit}>
                     <InlineStack gap="300" blockAlign="end" wrap>
-                        {config.title === 'Gift Cards Purchased' ? (
+                        {config.title === 'Gift Card Orders' ? (
                             <>
+                                <TextField
+                                    label="Search"
+                                    placeholder="Search order, customer, email..."
+                                    value={values.search || ''}
+                                    onChange={(value) => setValues((prev) => ({ ...prev, search: value }))}
+                                    autoComplete="off"
+                                />
                                 <Select
                                     label="Filter Status"
                                     options={[
                                         { label: 'All statuses', value: '' },
-                                        { label: 'Pending Issuance', value: 'pending_issuance' },
-                                        { label: 'Unused (Active)', value: 'unused' },
-                                        { label: 'Partially Used', value: 'partially_used' },
+                                        { label: 'Completed', value: 'completed' },
+                                        { label: 'Pending', value: 'pending' },
+                                        { label: 'Unused', value: 'unused' },
                                         { label: 'Used', value: 'used' },
-                                        { label: 'Expired', value: 'expired' },
-                                        { label: 'Revoked', value: 'revoked' },
                                     ]}
                                     value={values.status || ''}
                                     onChange={(value) => setValues((prev) => ({ ...prev, status: value }))}
@@ -229,7 +268,7 @@ function DashboardControls({ config }) {
                                 />
                             </>
                         )}
-                        <Button submit variant="primary">Filter</Button>
+                        <Button submit variant="primary">Filter / Search</Button>
                         <Button onClick={reset}>Reset</Button>
                     </InlineStack>
                 </form>
@@ -238,83 +277,214 @@ function DashboardControls({ config }) {
     );
 }
 
-function DashboardTable({ config }) {
+function DashboardTable({ config, onPageChange }) {
     const rows = config.rows || [];
-    const isPurchased = config.title === 'Gift Cards Purchased';
+    const isOrders = config.title === 'Gift Card Orders';
+    const [hoveredRowId, setHoveredRowId] = React.useState(null);
 
     return (
         <Card>
             <Box padding="400">
-                <InlineStack align="space-between" blockAlign="center">
-                    <Text as="h2" variant="headingMd">{config.title}</Text>
-                    <Button variant="primary" url={config.exportUrl}>Export CSV</Button>
-                </InlineStack>
-            </Box>
-            <Box padding="400" borderBlockStartWidth="025" borderColor="border-subdued">
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead>
-                            <tr style={{ textAlign: 'left', background: 'var(--p-color-bg-surface-secondary)' }}>
-                                {isPurchased ? (
+                    <thead>
+                        <tr style={{ textAlign: 'left', background: 'var(--p-color-bg-surface-secondary)' }}>
+                            {isOrders ? (
+                                <>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Shopify Order</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Voucher Code</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Customer Name</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Recipient</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Recipient Email</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Amount</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Template</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Delivery Date</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Status</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Created At</th>
+                                </>
+                            ) : (
+                                <>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Code</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Amount Used</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Balance Before</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Balance After</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Order</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Date</th>
+                                </>
+                            )}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows.length === 0 ? (
+                            <tr>
+                                <td colSpan={isOrders ? 10 : 6} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--p-color-text-disabled)' }}>
+                                    {isOrders ? 'No gift card orders found.' : 'No redemptions found.'}
+                                </td>
+                            </tr>
+                        ) : rows.map((row) => (
+                            <tr
+                                key={row.id}
+                                onMouseEnter={() => setHoveredRowId(row.id)}
+                                onMouseLeave={() => setHoveredRowId(null)}
+                                style={{
+                                    borderTop: '1px solid var(--p-color-border-subdued)',
+                                    background: hoveredRowId === row.id ? 'var(--p-color-bg-surface-hover)' : 'transparent',
+                                    transition: 'background-color 0.2s ease',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                {isOrders ? (
                                     <>
-                                        <th style={{ padding: '14px 16px' }}>Code</th>
-                                        <th style={{ padding: '14px 16px' }}>Amount</th>
-                                        <th style={{ padding: '14px 16px' }}>Balance</th>
-                                        <th style={{ padding: '14px 16px' }}>Status</th>
-                                        <th style={{ padding: '14px 16px' }}>Recipient</th>
-                                        <th style={{ padding: '14px 16px' }}>Order</th>
-                                        <th style={{ padding: '14px 16px' }}>Date</th>
+                                        <td style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--p-color-text)' }}>{row.shopifyOrderNumber}</td>
+                                        <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 600, color: 'var(--p-color-text)' }}>{row.voucherCode}</td>
+                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.customerName || '-'}</td>
+                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.recipientName || '-'}</td>
+                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.recipientEmail || '-'}</td>
+                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)', fontWeight: 600 }}>${Number(row.amount || 0).toFixed(2)}</td>
+                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.templateName}</td>
+                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.deliveryDate || '-'}</td>
+                                        <td style={{ padding: '14px 16px' }}>
+                                            <Badge tone={row.voucherStatus === 'used' ? 'critical' : row.voucherStatus === 'unused' ? 'success' : 'attention'}>
+                                                {String(row.voucherStatus || '').replaceAll('_', ' ')}
+                                            </Badge>
+                                        </td>
+                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.createdAt || '-'}</td>
                                     </>
                                 ) : (
                                     <>
-                                        <th style={{ padding: '14px 16px' }}>Code</th>
-                                        <th style={{ padding: '14px 16px' }}>Amount Used</th>
-                                        <th style={{ padding: '14px 16px' }}>Balance Before</th>
-                                        <th style={{ padding: '14px 16px' }}>Balance After</th>
-                                        <th style={{ padding: '14px 16px' }}>Order</th>
-                                        <th style={{ padding: '14px 16px' }}>Date</th>
+                                        <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 600, color: 'var(--p-color-text)' }}>{row.code || 'Deleted'}</td>
+                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text-critical)', fontWeight: 600 }}>-${Number(row.amountUsed || 0).toFixed(2)}</td>
+                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>${Number(row.balanceBefore || 0).toFixed(2)}</td>
+                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>${Number(row.balanceAfter || 0).toFixed(2)}</td>
+                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.orderId || '-'}</td>
+                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.createdAt || '-'}</td>
                                     </>
                                 )}
                             </tr>
-                        </thead>
-                        <tbody>
-                            {rows.length === 0 ? (
-                                <tr>
-                                    <td colSpan={isPurchased ? 7 : 6} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--p-color-text-disabled)' }}>
-                                        {isPurchased ? 'No purchased gift cards found.' : 'No redemptions found.'}
-                                    </td>
-                                </tr>
-                            ) : rows.map((row) => (
-                                <tr key={row.id} style={{ borderTop: '1px solid var(--p-color-border-subdued)' }}>
-                                    {isPurchased ? (
-                                        <>
-                                            <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 600 }}>{row.code}</td>
-                                            <td style={{ padding: '14px 16px' }}>${Number(row.originalAmount || 0).toFixed(2)}</td>
-                                            <td style={{ padding: '14px 16px' }}>${Number(row.remainingBalance || 0).toFixed(2)}</td>
-                                            <td style={{ padding: '14px 16px' }}>
-                                                <Badge tone={row.status === 'used' ? 'critical' : row.status === 'unused' ? 'success' : 'attention'}>
-                                                    {String(row.status || '').replaceAll('_', ' ')}
-                                                </Badge>
-                                            </td>
-                                            <td style={{ padding: '14px 16px' }}>{row.recipientName || '-'}</td>
-                                            <td style={{ padding: '14px 16px' }}>{row.orderId || '-'}</td>
-                                            <td style={{ padding: '14px 16px' }}>{row.createdAt || '-'}</td>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 600 }}>{row.code || 'Deleted'}</td>
-                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text-critical)', fontWeight: 600 }}>-${Number(row.amountUsed || 0).toFixed(2)}</td>
-                                            <td style={{ padding: '14px 16px' }}>${Number(row.balanceBefore || 0).toFixed(2)}</td>
-                                            <td style={{ padding: '14px 16px' }}>${Number(row.balanceAfter || 0).toFixed(2)}</td>
-                                            <td style={{ padding: '14px 16px' }}>{row.orderId || '-'}</td>
-                                            <td style={{ padding: '14px 16px' }}>{row.createdAt || '-'}</td>
-                                        </>
-                                    )}
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                        ))}
+                    </tbody>
+                </table>
             </Box>
+            {config.pagination && config.pagination.lastPage > 1 && (
+                <Box padding="400" borderBlockStartWidth="025" borderColor="border-subdued">
+                    <InlineStack align="center">
+                        <Pagination
+                            hasPrevious={config.pagination.hasPrevious}
+                            onPrevious={() => {
+                                onPageChange(config.pagination.currentPage - 1);
+                            }}
+                            hasNext={config.pagination.hasNext}
+                            onNext={() => {
+                                onPageChange(config.pagination.currentPage + 1);
+                            }}
+                        />
+                    </InlineStack>
+                </Box>
+            )}
         </Card>
+    );
+}
+
+function DashboardSection({ initialConfig }) {
+    const [config, setConfig] = React.useState(initialConfig);
+    const [loading, setLoading] = React.useState(false);
+
+    const handleFilterChange = async (filters, page = null) => {
+        setLoading(true);
+        try {
+            const url = new URL(window.location.href);
+            const params = new URLSearchParams(url.search);
+
+            // Preserve shop & host params from current URL or initialConfig fallback
+            const shop = params.get('shop') || initialConfig.shop || '';
+            const host = params.get('host') || initialConfig.host || '';
+            if (shop) params.set('shop', shop);
+            if (host) params.set('host', host);
+
+            // Set filter params
+            Object.entries(filters).forEach(([key, value]) => {
+                const paramKey = initialConfig.title === 'Gift Card Orders'
+                    ? (key === 'status' ? 'p_status' : (key === 'search' ? 'p_search' : `p_${key}`))
+                    : `u_${key}`;
+                if (value === null || value === undefined || value === '') {
+                    params.delete(paramKey);
+                } else {
+                    params.set(paramKey, value);
+                }
+            });
+
+            // Set page param if specified
+            const pageParam = initialConfig.title === 'Gift Card Orders' ? 'p_page' : 'u_page';
+            if (page) {
+                params.set(pageParam, page);
+            } else {
+                params.delete(pageParam);
+            }
+
+            const fetchUrl = `${url.pathname}?${params.toString()}`;
+
+            // Update browser URL state history so back/refresh works, but without reload!
+            window.history.replaceState(null, '', fetchUrl);
+
+            const response = await fetch(fetchUrl, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json'
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                
+                setConfig((prev) => ({
+                    ...prev,
+                    rows: initialConfig.title === 'Gift Card Orders' ? data.purchasedRows : data.usedRows,
+                    pagination: initialConfig.title === 'Gift Card Orders' ? data.purchasedPagination : data.usedPagination,
+                    filters: filters
+                }));
+
+                if (data.stats) {
+                    const event = new CustomEvent('update-dashboard-stats', { detail: data.stats });
+                    window.dispatchEvent(event);
+                }
+            }
+        } catch (error) {
+            console.error('Failed to fetch dashboard data:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <BlockStack gap="400">
+            <DashboardControls
+                config={config}
+                onFilterChange={handleFilterChange}
+            />
+            <div style={{ position: 'relative' }}>
+                {loading && (
+                    <div style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        background: 'rgba(255, 255, 255, 0.4)',
+                        zIndex: 10,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 'var(--p-border-radius-200)',
+                        backdropFilter: 'blur(1px)'
+                    }}>
+                        <Text tone="subdued">Loading...</Text>
+                    </div>
+                )}
+                <DashboardTable
+                    config={config}
+                    onPageChange={(page) => handleFilterChange(config.filters || {}, page)}
+                />
+            </div>
+        </BlockStack>
     );
 }
 
@@ -335,14 +505,9 @@ document.addEventListener('DOMContentLoaded', () => {
     mounts.forEach((mount) => {
         if (!mount) return;
         const config = parseConfig(mount.dataset.config, {});
-        const isPurchased = config.title === 'Gift Cards Purchased';
         createRoot(mount).render(
             <AppProvider i18n={{}}>
-                <BlockStack gap="400">
-                    <DashboardOverview stats={config.stats || {}} />
-                    <DashboardControls config={config} />
-                    <DashboardTable config={config} />
-                </BlockStack>
+                <DashboardSection initialConfig={config} />
             </AppProvider>
         );
     });
