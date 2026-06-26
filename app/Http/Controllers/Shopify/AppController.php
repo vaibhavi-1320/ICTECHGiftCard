@@ -14,11 +14,11 @@ use Illuminate\View\View;
 
 class AppController extends Controller
 {
-    public function __invoke(Request $request): View|RedirectResponse
+    public function __invoke(Request $request)
     {
         $shopDomain = $request->string('shop')->toString();
 
-        if ($request->routeIs('shopify.app') && $request->query('section') === null && !$request->has('p_status') && !$request->has('p_from') && !$request->has('p_search')) {
+        if (!$request->ajax() && !$request->wantsJson() && $request->routeIs('shopify.app') && $request->query('section') === null && !$request->has('p_status') && !$request->has('p_from') && !$request->has('p_search')) {
             return redirect()->route('shopify.gift-cards.index', $request->query());
         }
 

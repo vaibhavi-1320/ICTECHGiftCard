@@ -168,7 +168,10 @@ function DashboardControls({ config, onFilterChange }) {
     // Debounce search input
     React.useEffect(() => {
         const handler = setTimeout(() => {
-            if (values.search !== (config.filters?.search || '')) {
+            const isOrders = config.title === 'Gift Card Orders';
+            const searchVal = values.search || '';
+            const configSearchVal = config.filters?.search || '';
+            if (isOrders && searchVal !== configSearchVal) {
                 onFilterChange(values);
             }
         }, 500);
@@ -177,9 +180,12 @@ function DashboardControls({ config, onFilterChange }) {
 
     // Handle dropdown/date changes immediately
     React.useEffect(() => {
-        if (values.status !== (config.filters?.status || '') ||
-            values.from !== (config.filters?.from || '') ||
-            values.to !== (config.filters?.to || '')) {
+        const isOrders = config.title === 'Gift Card Orders';
+        const statusChanged = isOrders && (values.status || '') !== (config.filters?.status || '');
+        const fromChanged = (values.from || '') !== (config.filters?.from || '');
+        const toChanged = (values.to || '') !== (config.filters?.to || '');
+
+        if (statusChanged || fromChanged || toChanged) {
             onFilterChange(values);
         }
     }, [values.status, values.from, values.to]);
