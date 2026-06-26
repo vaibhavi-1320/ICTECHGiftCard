@@ -1027,7 +1027,7 @@ class ShopifyService
       }
 
       if (state.selectedTemplateRealUrl) {
-        props['Template Image'] = state.selectedTemplateRealUrl;
+        props['_Template Image'] = state.selectedTemplateRealUrl;
       }
 
       var msg = document.getElementById('gc-field-message').value.trim();

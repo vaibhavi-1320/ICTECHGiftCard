@@ -155,13 +155,18 @@ class GiftCardController extends Controller
 
     private function generateVoucherPool(GiftCard $giftCard): void
     {
-        $prefix = strtoupper(trim($giftCard->code_prefix ?: 'GC'));
+        $prefix = strtoupper(trim($giftCard->code_prefix ?: ''));
         $existing = GiftCardVoucher::pluck('code')->toArray();
         $vouchers = [];
 
         for ($i = 0; $i < 25; $i++) {
             do {
-                $code = $prefix . '-' . strtoupper(bin2hex(random_bytes(4)));
+                $characters = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+                $randomPart = '';
+                for ($j = 0; $j < 12; $j++) {
+                    $randomPart .= $characters[random_int(0, 35)];
+                }
+                $code = $prefix !== '' ? ($prefix . '-' . $randomPart) : $randomPart;
             } while (in_array($code, $existing));
 
             $existing[] = $code;

@@ -109,11 +109,19 @@ class VerifyShopifySession
                 }
 
                 if (!empty($missingScopes)) {
-                    \Illuminate\Support\Facades\Log::warning('VerifyShopifySession: Missing scopes detected.', [
+                    \Illuminate\Support\Facades\Log::warning('VerifyShopifySession: Missing scopes detected. Re-triggering OAuth.', [
                         'required' => $requiredScopes,
                         'granted' => $grantedScopes,
                         'missing' => $missingScopes
                     ]);
+                    $shop->update(['access_token' => null]);
+                    session()->forget(['shopify_shop', 'shopify_token_verified']);
+                    $redirectParams = $request->query();
+                    $redirectParams['shop'] = $shopDomain;
+                    if ($host && !isset($redirectParams['host'])) {
+                        $redirectParams['host'] = $host;
+                    }
+                    return redirect()->route('shopify.install', $redirectParams);
                 }
 
                 session(['shopify_token_verified' => true]);

@@ -10,6 +10,7 @@ class GiftCardVoucher extends Model
 {
     protected $fillable = [
         'gift_card_id',
+        'gift_card_order_id',
         'shopify_order_id',
         'shopify_order_line_item_id',
         'shopify_customer_id',
@@ -41,6 +42,11 @@ class GiftCardVoucher extends Model
     public function giftCard(): BelongsTo
     {
         return $this->belongsTo(GiftCard::class);
+    }
+
+    public function giftCardOrder(): BelongsTo
+    {
+        return $this->belongsTo(GiftCardOrder::class, 'gift_card_order_id');
     }
 
     public function transactions(): HasMany

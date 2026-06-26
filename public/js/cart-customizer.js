@@ -111,11 +111,12 @@
         }
 
         items.forEach(function(item, index) {
-          if (!item.properties || !item.properties['Template Image']) {
+          var templateUrl = item.properties ? (item.properties['Template Image'] || item.properties['_Template Image']) : null;
+          if (!templateUrl) {
             return;
           }
 
-          var templateUrl = item.properties['Template Image'];
+          
           var cartEl = cartItemEls[index];
           if (!cartEl) {
             return;
@@ -183,8 +184,10 @@
           allChildren.forEach(function(child) {
             var text = (child.textContent || '').trim();
             if (
-              text.indexOf('Template Image') !== -1 || 
+              text.indexOf('Template Image') !== -1 ||
+              text.indexOf('_Template Image') !== -1 || 
               text.indexOf('Template_Image') !== -1 ||
+              text.indexOf('_Template_Image') !== -1 ||
               (child.tagName === 'A' && child.href && child.href.indexOf('/storage/gift-card-templates/') !== -1)
             ) {
               if (child.children.length === 0 || (child.children.length > 0 && child.querySelector('a, span, p'))) {
