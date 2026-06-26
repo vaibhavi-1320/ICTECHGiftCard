@@ -35,25 +35,33 @@
         $stats = array_merge(['totalVouchers' => 0, 'pendingVouchers' => 0, 'redeemedAmount' => 0, 'expiredVouchers' => 0, 'totalSold' => 0.0], $stats ?? []);
         $purchasedVouchers = $purchasedVouchers ?? collect();
         $usedTransactions = $usedTransactions ?? collect();
-        $purchasedRows = $purchasedVouchers->map(fn ($v) => [
-            'id' => $v->id,
-            'code' => $v->code,
-            'originalAmount' => $v->original_amount,
-            'remainingBalance' => $v->remaining_balance,
-            'status' => $v->status,
-            'recipientName' => $v->recipient_name,
-            'orderId' => $v->shopify_order_id,
-            'createdAt' => $v->created_at?->format('Y-m-d'),
-        ])->values();
-        $usedRows = $usedTransactions->map(fn ($t) => [
-            'id' => $t->id,
-            'code' => $t->voucher?->code,
-            'amountUsed' => $t->amount_used,
-            'balanceBefore' => $t->balance_before,
-            'balanceAfter' => $t->balance_after,
-            'orderId' => $t->shopify_order_id,
-            'createdAt' => $t->created_at?->format('Y-m-d H:i'),
-        ])->values();
+        $purchasedRows = $purchasedRows ?? collect();
+        $usedTransactions = $usedTransactions ?? collect();
+        $usedRows = $usedRows ?? collect();
+
+        $purchasedPagination = null;
+        if (isset($orders) && $orders instanceof \Illuminate\Pagination\LengthAwarePaginator) {
+            $purchasedPagination = [
+                'currentPage' => $orders->currentPage(),
+                'lastPage' => $orders->lastPage(),
+                'hasPrevious' => !$orders->onFirstPage(),
+                'hasNext' => $orders->hasMorePages(),
+                'prevPageUrl' => $orders->previousPageUrl(),
+                'nextPageUrl' => $orders->nextPageUrl(),
+            ];
+        }
+
+        $usedPagination = null;
+        if (isset($usedTransactions) && $usedTransactions instanceof \Illuminate\Pagination\LengthAwarePaginator) {
+            $usedPagination = [
+                'currentPage' => $usedTransactions->currentPage(),
+                'lastPage' => $usedTransactions->lastPage(),
+                'hasPrevious' => !$usedTransactions->onFirstPage(),
+                'hasNext' => $usedTransactions->hasMorePages(),
+                'prevPageUrl' => $usedTransactions->previousPageUrl(),
+                'nextPageUrl' => $usedTransactions->nextPageUrl(),
+            ];
+        }
     @endphp
 
     <ui-nav-menu>
@@ -66,22 +74,28 @@
 
     <ui-title-bar title="Dashboard"></ui-title-bar>
 
-    <div class="Polaris-Page">
+    <div class="Polaris-Page Polaris-Page--fullWidth">
         <div class="Polaris-Page__Content">
             <div id="dashboard-overview-react" data-stats='@json($stats)' style="margin-bottom: 16px;"></div>
             <div id="dashboard-purchased-react" data-config="{{ e(json_encode([
-                            "title" => "Gift Cards Purchased",
-                            "exportUrl" => route("shopify.dashboard.purchased-export", array_merge(request()->query(), ["status" => request("p_status"), "dateFrom" => request("p_from"), "dateTo" => request("p_to")]), false),
-                            "resetUrl" => route("shopify.app", \Illuminate\Support\Arr::except(request()->query(), ["p_status", "p_from", "p_to", "p_page", "u_page"]), false),
+                            "title" => "Gift Card Orders",
+                            "shop" => $shopDomain,
+                            "host" => request('host'),
+                            "exportUrl" => route("shopify.dashboard.purchased-export", array_merge(request()->query(), ["status" => request("p_status"), "search" => request("p_search"), "dateFrom" => request("p_from"), "dateTo" => request("p_to")]), false),
+                            "resetUrl" => route("shopify.app", \Illuminate\Support\Arr::except(request()->query(), ["p_status", "p_search", "p_from", "p_to", "p_page", "u_page"]), false),
                             "filters" => [
                                 "status" => request("p_status", ""),
+                                "search" => request("p_search", ""),
                                 "from" => request("p_from", ""),
                                 "to" => request("p_to", ""),
                             ],
                             "rows" => $purchasedRows,
+                            "pagination" => $purchasedPagination,
                         ])) }}"></div>
             <div id="dashboard-used-react" data-config="{{ e(json_encode([
                             "title" => "Gift Cards Used",
+                            "shop" => $shopDomain,
+                            "host" => request('host'),
                             "exportUrl" => route("shopify.dashboard.used-export", array_merge(request()->query(), ["dateFrom" => request("u_from"), "dateTo" => request("u_to")]), false),
                             "resetUrl" => route("shopify.app", \Illuminate\Support\Arr::except(request()->query(), ["u_from", "u_to", "p_page", "u_page"]), false),
                             "filters" => [
@@ -89,6 +103,7 @@
                                 "to" => request("u_to", ""),
                             ],
                             "rows" => $usedRows,
+                            "pagination" => $usedPagination,
                         ])) }}"></div>
             </div>
         </div>

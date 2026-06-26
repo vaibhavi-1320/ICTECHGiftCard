@@ -187,6 +187,19 @@ class ShopifyService
                     }
 
                     if ($activeThemeId) {
+                        // 1. Upload cart-customizer.js directly to the theme assets
+                        $jsPath = public_path('js/cart-customizer.js');
+                        if (file_exists($jsPath)) {
+                            $jsContent = file_get_contents($jsPath);
+                            $this->api($shop, 'PUT', "themes/{$activeThemeId}/assets.json", [
+                                'asset' => [
+                                    'key' => 'assets/cart-customizer.js',
+                                    'value' => $jsContent
+                                ]
+                            ]);
+                        }
+
+                        // 2. Fetch layout/theme.liquid
                         $assetResponse = $this->api($shop, 'GET', "themes/{$activeThemeId}/assets.json", [
                             'asset[key]' => 'layout/theme.liquid'
                         ]);
@@ -196,12 +209,14 @@ class ShopifyService
                             $value = $asset['value'] ?? '';
 
                             if (!empty($value)) {
-                                // Clean up any old script injections for cart-customizer.js
+                                // Clean up any old script injections (ngrok or asset-based) for cart-customizer.js
                                 $pattern = '/<script[^>]*src="[^"]*\/cart-customizer\.js"[^>]*><\/script>\s*/i';
                                 $value = preg_replace($pattern, '', $value);
+                                $patternLiquid = '/<script[^>]*src="\{\{\s*\'cart-customizer\.js\'\s*\|\s*asset_url\s*\}\}"[^>]*><\/script>\s*/i';
+                                $value = preg_replace($patternLiquid, '', $value);
 
-                                // Inject the new one right before </body>
-                                $newScriptTag = '<script src="' . htmlspecialchars($scriptUrl) . '" defer="defer"></script>';
+                                // Inject the asset-based script tag right before </body>
+                                $newScriptTag = '<script src="{{ \'cart-customizer.js\' | asset_url }}" defer="defer"></script>';
                                 if (strpos($value, '</body>') !== false) {
                                     $value = str_replace('</body>', $newScriptTag . "\n  </body>", $value);
                                 } else {
@@ -244,25 +259,17 @@ class ShopifyService
                 ->get()
                 ->map(function ($t) {
                     $mediaUrl = $t->media_url;
-                    $dataUri  = null;
-
-                    // Try to read from local disk and convert to base64 data URI
-                    // This eliminates ALL cross-origin/CORS/ngrok issues on the storefront
-                    if ($mediaUrl && !str_starts_with($mediaUrl, 'http')) {
-                        $localPath = storage_path('app/public/' . $mediaUrl);
-                        if (file_exists($localPath)) {
-                            $mime    = mime_content_type($localPath) ?: 'image/png';
-                            $b64     = base64_encode(file_get_contents($localPath));
-                            $dataUri = 'data:' . $mime . ';base64,' . $b64;
-                        }
+                    $url = $mediaUrl ? url('/storage/' . $mediaUrl) : null;
+                    if ($url && str_starts_with($url, 'http://')) {
+                        $url = str_replace('http://', 'https://', $url);
                     }
 
                     return [
                         'id'             => $t->id,
                         'name'           => $t->name,
                         'tag'            => $t->tag ?: 'Various',
-                        'media_url'      => $dataUri ?: ($mediaUrl ? url('/storage/' . $mediaUrl) : null),
-                        'real_media_url' => $mediaUrl ? url('/storage/' . $mediaUrl) : null,
+                        'media_url'      => $url,
+                        'real_media_url' => $url,
                     ];
                 });
 
@@ -1020,7 +1027,7 @@ class ShopifyService
       }
 
       if (state.selectedTemplateRealUrl) {
-        props['Template Image'] = state.selectedTemplateRealUrl;
+        props['_Template Image'] = state.selectedTemplateRealUrl;
       }
 
       var msg = document.getElementById('gc-field-message').value.trim();

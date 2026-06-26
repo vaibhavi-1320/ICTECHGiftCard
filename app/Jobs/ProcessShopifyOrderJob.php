@@ -48,11 +48,14 @@ class ProcessShopifyOrderJob implements ShouldQueue
         }
 
         // 1. Voucher Redemption (if order contains discount code matching our vouchers)
-        // Note: we can process redemption regardless of financial status, but usually when order is created/paid
         $this->processRedemptions($shop, $orderId, $shopifyService);
 
-        // 2. Voucher Issuance (only if order is paid)
-        if ($financialStatus === 'paid') {
+        // 2. Voucher Issuance
+        // Process for 'paid' orders AND 'pending' orders (e.g. Cash on Delivery).
+        // The idempotency check inside processIssuance prevents duplicate vouchers
+        // if this webhook fires multiple times for the same order.
+        $issuanceStatuses = ['paid', 'pending', 'authorized'];
+        if (in_array($financialStatus, $issuanceStatuses)) {
             $this->processIssuance($shop, $orderId, $shopifyService);
         }
     }
@@ -89,6 +92,53 @@ class ProcessShopifyOrderJob implements ShouldQueue
                     continue;
                 }
 
+                // Parse storefront customization properties
+                // Note: keys starting with _ are hidden by Shopify on checkout but still present in webhook
+                $properties = [];
+                foreach ($lineItem['properties'] ?? [] as $prop) {
+                    if (isset($prop['name']) && isset($prop['value'])) {
+                        // Normalize: strip leading underscore for matching, keep original value
+                        $key = strtolower(trim(ltrim($prop['name'], '_')));
+                        $properties[$key] = $prop['value'];
+                    }
+                }
+
+                $recipientName      = $properties['recipient name']      ?? $properties['recipient_name']      ?? '';
+                $recipientEmail     = $properties['recipient email']     ?? $properties['recipient_email']     ?? '';
+                $senderName         = $properties['sender name']         ?? $properties['sender_name']         ?? '';
+                $personalMessage    = $properties['message']             ?? $properties['personal message']    ?? $properties['personal_message'] ?? '';
+                $deliveryMethod     = $properties['delivery method']     ?? $properties['delivery_method']     ?? 'print';
+                $templateName       = $properties['template name']       ?? $properties['template_name']       ?? '';
+                $templateImageUrl   = $properties['template image']      ?? $properties['template_image']      ?? '';
+                $scheduledSendDate  = $properties['scheduled send date'] ?? $properties['scheduled_send_date'] ?? now()->format('Y-m-d');
+
+                // Extract customer and order properties
+                $orderNumber = $this->payload['name'] ?? $this->payload['order_number'] ?? '';
+                $firstName = $this->payload['customer']['first_name'] ?? '';
+                $lastName = $this->payload['customer']['last_name'] ?? '';
+                $customerName = trim($firstName . ' ' . $lastName);
+                $customerEmail = $this->payload['customer']['email'] ?? '';
+
+                // Create the Gift Card Order Record (Step 3)
+                $giftCardOrder = new \App\Models\GiftCardOrder();
+                $giftCardOrder->shopify_order_id = $orderId;
+                $giftCardOrder->shopify_order_number = $orderNumber;
+                $giftCardOrder->shopify_customer_id = $customerId;
+                $giftCardOrder->customer_name = $customerName ?: 'Customer';
+                $giftCardOrder->customer_email = $customerEmail;
+                $giftCardOrder->shopify_product_id = (string) ($lineItem['product_id'] ?? '');
+                $giftCardOrder->shopify_variant_id = (string) $variantId;
+                $giftCardOrder->gift_card_product_name = $lineItem['title'] ?? 'Gift Card';
+                $giftCardOrder->amount = $giftCard->amount;
+                $giftCardOrder->template_name = $templateName;
+                $giftCardOrder->recipient_name = $recipientName ?: ($this->payload['shipping_address']['name'] ?? $firstName ?: 'Recipient');
+                $giftCardOrder->recipient_email = $recipientEmail ?: $customerEmail;
+                $giftCardOrder->sender_name = $senderName ?: ($firstName ?: 'Sender');
+                $giftCardOrder->personal_message = $personalMessage;
+                $giftCardOrder->delivery_date = Carbon::parse($scheduledSendDate)->format('Y-m-d');
+                $giftCardOrder->status = 'completed';
+                $giftCardOrder->save();
+
                 // Pick a pending voucher from the pool, or generate on the fly
                 $voucher = GiftCardVoucher::where('gift_card_id', $giftCard->id)
                     ->where('status', 'pending_issuance')
@@ -96,9 +146,14 @@ class ProcessShopifyOrderJob implements ShouldQueue
                     ->first();
 
                 if (!$voucher) {
-                    $prefix = strtoupper(trim($giftCard->code_prefix ?: 'GC'));
+                    $prefix = strtoupper(trim($giftCard->code_prefix ?: ''));
                     do {
-                        $code = $prefix . '-' . strtoupper(bin2hex(random_bytes(4)));
+                        $characters = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+                        $randomPart = '';
+                        for ($j = 0; $j < 12; $j++) {
+                            $randomPart .= $characters[random_int(0, 35)];
+                        }
+                        $code = $prefix !== '' ? ($prefix . '-' . $randomPart) : $randomPart;
                     } while (GiftCardVoucher::where('code', $code)->exists());
 
                     $voucher = new GiftCardVoucher();
@@ -109,31 +164,34 @@ class ProcessShopifyOrderJob implements ShouldQueue
                     $voucher->currency = $this->payload['currency'] ?? 'USD';
                 }
 
-                // Parse storefront customization properties
-                $properties = [];
-                foreach ($lineItem['properties'] ?? [] as $prop) {
-                    if (isset($prop['name']) && isset($prop['value'])) {
-                        $properties[strtolower(trim($prop['name']))] = $prop['value'];
-                    }
-                }
-
-                $recipientName = $properties['recipient name'] ?? $properties['recipient_name'] ?? '';
-                $recipientEmail = $properties['recipient email'] ?? $properties['recipient_email'] ?? '';
-                $senderName = $properties['sender name'] ?? $properties['sender_name'] ?? '';
-                $personalMessage = $properties['personal message'] ?? $properties['personal_message'] ?? '';
-                $scheduledSendDate = $properties['scheduled send date'] ?? $properties['scheduled_send_date'] ?? now()->format('Y-m-d');
-
+                // Associate GiftCardOrder with the Voucher (Step 4)
+                $voucher->gift_card_order_id = $giftCardOrder->id;
                 $voucher->shopify_order_id = $orderId;
                 $voucher->shopify_order_line_item_id = $lineItemId;
                 $voucher->shopify_customer_id = $customerId;
-                $voucher->recipient_name = $recipientName ?: ($this->payload['shipping_address']['name'] ?? $this->payload['customer']['first_name'] ?? 'Recipient');
-                $voucher->recipient_email = $recipientEmail ?: ($this->payload['customer']['email'] ?? '');
-                $voucher->sender_name = $senderName ?: ($this->payload['customer']['first_name'] ?? 'Sender');
+                $voucher->recipient_name = $giftCardOrder->recipient_name;
+                $voucher->recipient_email = $giftCardOrder->recipient_email;
+                $voucher->sender_name = $giftCardOrder->sender_name;
                 $voucher->personal_message = $personalMessage;
                 $voucher->scheduled_send_date = Carbon::parse($scheduledSendDate)->format('Y-m-d');
                 $voucher->expires_at = now()->addDays((int) ($giftCard->validity_days ?: 365))->format('Y-m-d');
                 $voucher->status = 'unused';
-                $voucher->metadata = array_merge($voucher->metadata ?? [], ['item_index' => $k]);
+
+                // Resolve local template image path from URL if possible
+                $templateLocalPath = '';
+                if ($templateImageUrl) {
+                    // Extract relative path from URL like .../storage/gift-card-templates/xxx.png
+                    if (preg_match('#/storage/(.+)$#', $templateImageUrl, $m)) {
+                        $templateLocalPath = $m[1]; // e.g. gift-card-templates/xxx.png
+                    }
+                }
+
+                $voucher->metadata = array_merge($voucher->metadata ?? [], [
+                    'item_index'         => $k,
+                    'delivery_method'    => $deliveryMethod,
+                    'template_name'      => $templateName,
+                    'template_image_url' => $templateLocalPath ?: $templateImageUrl,
+                ]);
                 $voucher->save();
 
                 // Create Shopify Price Rule
