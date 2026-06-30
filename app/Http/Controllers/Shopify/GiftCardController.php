@@ -40,6 +40,7 @@ class GiftCardController extends Controller
 
         $giftCards = Schema::hasTable('gift_cards')
             ? GiftCard::query()
+                ->with('template')
                 ->when($shop?->id, fn ($query, $shopId) => $query->where('shop_id', $shopId))
                 ->latest()
                 ->get()
@@ -76,11 +77,11 @@ class GiftCardController extends Controller
         try {
             $this->syncShopifyProduct($shopifyService, $shop, $giftCard, 'POST');
         } catch (\Throwable $e) {
-            // Log or handle error, but proceed to save the gift card locally
+            Log::error('Gift card product sync failed (POST): ' . $e->getMessage(), ['exception' => $e]);
         }
 
-        // Generate voucher pool
-        $this->generateVoucherPool($giftCard);
+        // Generate voucher pool (Disabled to prevent creating 25 empty entries; vouchers will be generated on-the-fly when ordered)
+        // $this->generateVoucherPool($giftCard);
 
         try {
             $shopifyService->createStorefrontResources($shop);
@@ -111,7 +112,7 @@ class GiftCardController extends Controller
             try {
                 $this->syncShopifyProduct($shopifyService, $shop, $giftCard, 'PUT');
             } catch (\Throwable $e) {
-                // Ignore errors during sync to prevent app crash
+                Log::error('Gift card product sync failed (PUT): ' . $e->getMessage(), ['exception' => $e]);
             }
         }
 
@@ -220,15 +221,37 @@ class GiftCardController extends Controller
             'code_prefix' => ['nullable', 'string', 'max:20'],
             'validity_days' => ['required', 'integer', 'min:1'],
             'active' => ['nullable', 'boolean'],
-            'template_id' => ['nullable', 'integer', 'exists:gift_card_templates,id'],
+            'template_id' => ['required', 'integer', 'exists:gift_card_templates,id'],
             'image_upload' => ['nullable', 'file', 'image', 'max:5120'],
         ]);
     }
 
     private function syncShopifyProduct(ShopifyService $shopifyService, Shop $shop, GiftCard $giftCard, string $method): void
     {
-        $template = $giftCard->template()->first();
-        $imageUrl = $giftCard->image_url ? url('/storage/' . $giftCard->image_url) : null;
+        $template = $giftCard->template;
+        
+        $localPath = null;
+        if ($giftCard->image_url) {
+            $localPath = storage_path('app/public/' . $giftCard->image_url);
+        } elseif ($template && $template->media_url) {
+            $localPath = storage_path('app/public/' . $template->media_url);
+        } else {
+            $localPath = public_path('images/default-gift-card.png');
+        }
+
+        $attachment = null;
+        if ($localPath && file_exists($localPath)) {
+            $attachment = base64_encode(file_get_contents($localPath));
+        }
+
+        $images = [];
+        if ($attachment) {
+            $images[] = [
+                'attachment' => $attachment,
+                'filename' => basename($localPath) ?: 'image.png',
+            ];
+        }
+
         $payload = [
             'product' => [
                 'title' => $giftCard->name,
@@ -247,6 +270,7 @@ class GiftCardController extends Controller
                         'taxable' => false,
                     ],
                 ],
+                'images' => $images,
                 'metafields' => [
                     [
                         'namespace' => 'seo',
@@ -265,21 +289,6 @@ class GiftCardController extends Controller
                 $giftCard->shopify_product_id = $resData['product']['id'] ?? null;
                 $giftCard->shopify_product_variant_id = $resData['product']['variants'][0]['id'] ?? null;
                 $giftCard->save();
-
-                if ($imageUrl && $giftCard->shopify_product_id) {
-                    try {
-                        $shopifyService->api($shop, 'POST', "products/{$giftCard->shopify_product_id}/images.json", [
-                            'image' => ['src' => $imageUrl],
-                        ]);
-                    } catch (\Throwable $imageError) {
-                        Log::warning('Gift card product image sync failed', [
-                            'gift_card_id' => $giftCard->id,
-                            'product_id' => $giftCard->shopify_product_id,
-                            'error' => $imageError->getMessage(),
-                        ]);
-                    }
-                }
-
                 return;
             }
 
@@ -288,7 +297,7 @@ class GiftCardController extends Controller
                 'response' => $response->body(),
             ]);
 
-            $fallbackCreated = $this->createShopifyProductViaGraphql($shopifyService, $shop, $giftCard, $imageUrl);
+            $fallbackCreated = $this->createShopifyProductViaGraphql($shopifyService, $shop, $giftCard, $template, $attachment, $localPath);
             if ($fallbackCreated) {
                 return;
             }
@@ -325,20 +334,6 @@ class GiftCardController extends Controller
                     'response' => $variantResponse->body(),
                 ]);
             }
-
-            if ($imageUrl) {
-                try {
-                    $shopifyService->api($shop, 'POST', "products/{$giftCard->shopify_product_id}/images.json", [
-                        'image' => ['src' => $imageUrl],
-                    ]);
-                } catch (\Throwable $imageError) {
-                        Log::warning('Gift card product image sync failed', [
-                            'gift_card_id' => $giftCard->id,
-                            'product_id' => $giftCard->shopify_product_id,
-                            'error' => $imageError->getMessage(),
-                        ]);
-                }
-            }
         }
     }
 
@@ -351,10 +346,17 @@ class GiftCardController extends Controller
             '<p>Validity: ' . (int) ($giftCard->validity_days ?: 365) . ' days</p>',
         ];
 
+        if ($template) {
+            $parts[] = '<p>Template: ' . e($template->name) . '</p>';
+            if ($template->tag) {
+                $parts[] = '<p>Template Tag: ' . e($template->tag) . '</p>';
+            }
+        }
+
         return implode('', $parts);
     }
 
-    private function createShopifyProductViaGraphql(ShopifyService $shopifyService, Shop $shop, GiftCard $giftCard, ?string $imageUrl): bool
+    private function createShopifyProductViaGraphql(ShopifyService $shopifyService, Shop $shop, GiftCard $giftCard, ?GiftCardTemplate $template, ?string $attachment, ?string $localPath): bool
     {
         $query = <<<'GQL'
 mutation productCreate($input: ProductInput!) {
@@ -432,10 +434,13 @@ GQL;
         $giftCard->shopify_product_variant_id = $this->extractShopifyNumericId($variantGid);
         $giftCard->save();
 
-        if ($imageUrl && $giftCard->shopify_product_id) {
+        if ($attachment && $giftCard->shopify_product_id) {
             try {
                 $shopifyService->api($shop, 'POST', "products/{$giftCard->shopify_product_id}/images.json", [
-                    'image' => ['src' => $imageUrl],
+                    'image' => [
+                        'attachment' => $attachment,
+                        'filename' => basename($localPath) ?: 'image.png',
+                    ],
                 ]);
             } catch (\Throwable $imageError) {
                 Log::warning('Gift card product image sync failed after GraphQL create', [

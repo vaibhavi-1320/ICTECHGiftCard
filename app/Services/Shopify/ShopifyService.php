@@ -253,9 +253,31 @@ class ShopifyService
                 }
             }
 
-            // Fetch active templates
+            // Fetch active gift cards first to find which templates are assigned
+            $giftCards = \App\Models\GiftCard::where('shop_id', $shop->id)
+                ->where('active', true)
+                ->whereNotNull('shopify_product_variant_id')
+                ->where('shopify_product_variant_id', '!=', '')
+                ->whereNotNull('template_id')
+                ->get()
+                ->map(function ($g) {
+                    return [
+                        'id' => $g->id,
+                        'variant_id' => $g->shopify_product_variant_id,
+                        'amount' => (float) $g->amount,
+                        'name' => $g->name,
+                        'template_id' => $g->template_id,
+                    ];
+                })
+                ->sortBy('amount')
+                ->values();
+
+            $activeTemplateIds = $giftCards->pluck('template_id')->unique()->toArray();
+
+            // Fetch active templates associated with active gift cards
             $templates = \App\Models\GiftCardTemplate::where('shop_id', $shop->id)
                 ->where('active', true)
+                ->whereIn('id', $activeTemplateIds)
                 ->get()
                 ->map(function ($t) {
                     $mediaUrl = $t->media_url;
@@ -271,23 +293,7 @@ class ShopifyService
                         'media_url'      => $url,
                         'real_media_url' => $url,
                     ];
-                });
-
-            // Fetch active gift cards
-            $giftCards = \App\Models\GiftCard::where('shop_id', $shop->id)
-                ->where('active', true)
-                ->whereNotNull('shopify_product_variant_id')
-                ->where('shopify_product_variant_id', '!=', '')
-                ->get()
-                ->map(function ($g) {
-                    return [
-                        'id' => $g->id,
-                        'variant_id' => $g->shopify_product_variant_id,
-                        'amount' => (float) $g->amount,
-                        'name' => $g->name,
-                    ];
                 })
-                ->sortBy('amount')
                 ->values();
 
             $storefrontText = $shop->getSetting('storefrontText') ?: '<p>Delight your loved ones in just a few clicks! Birthday, Valentine\'s Day, weddings, Christmas... Send a personalized gift card by email to the address of your choice. The amount will then be available as a voucher valid across our entire site.</p>';
@@ -818,13 +824,9 @@ class ShopifyService
     // 6. Setup Buttons Actions
     setupActions();
 
-    // Select default template and amount
+    // Select default template
     if (state.templates.length > 0) {
       selectTemplate(state.templates[0].id);
-    }
-    if (state.giftCards.length > 0) {
-      document.getElementById('gc-field-amount').value = state.giftCards[0].variant_id;
-      handleAmountChange(state.giftCards[0].variant_id);
     }
   }
 
@@ -904,6 +906,11 @@ class ShopifyService
     });
   }
 
+  function formatCurrency(amount) {
+    var symbol = (window.Shopify && window.Shopify.currency && window.Shopify.currency.symbol) || '$';
+    return symbol + parseFloat(amount).toFixed(2);
+  }
+
   function selectTemplate(id) {
     state.selectedTemplateId = id;
     var items = document.querySelectorAll('.gc-template-item');
@@ -931,13 +938,21 @@ class ShopifyService
         card.style.backgroundImage = 'linear-gradient(135deg, #1e3a8a 0%, #0d9488 100%)';
       }
     }
+
+    // Re-render amounts dynamically based on selected template
+    renderAmounts();
   }
 
   function renderAmounts() {
     var select = document.getElementById('gc-field-amount');
     select.innerHTML = '';
 
-    if (state.giftCards.length === 0) {
+    // Filter gift cards associated with the selected template
+    var filteredCards = state.giftCards.filter(function(g) {
+      return g.template_id === state.selectedTemplateId;
+    });
+
+    if (filteredCards.length === 0) {
       var opt = document.createElement('option');
       opt.value = '';
       opt.innerText = 'No amounts available';
@@ -945,16 +960,20 @@ class ShopifyService
       return;
     }
 
-    state.giftCards.forEach(function(g) {
+    filteredCards.forEach(function(g) {
       var opt = document.createElement('option');
       opt.value = g.variant_id;
-      opt.innerText = '$' + parseFloat(g.amount).toFixed(2);
+      opt.innerText = formatCurrency(g.amount);
       select.appendChild(opt);
     });
 
-    select.addEventListener('change', function() {
+    select.onchange = function() {
       handleAmountChange(this.value);
-    });
+    };
+
+    // Auto-select first variant and update preview
+    select.value = filteredCards[0].variant_id;
+    handleAmountChange(filteredCards[0].variant_id);
   }
 
   function handleAmountChange(variantId) {
@@ -962,7 +981,7 @@ class ShopifyService
     if (gc) {
       state.selectedAmount = gc.amount;
       state.selectedVariantId = variantId;
-      document.getElementById('gc-preview-amount-val').innerText = '$' + parseFloat(gc.amount).toFixed(2);
+      document.getElementById('gc-preview-amount-val').innerText = formatCurrency(gc.amount);
     }
   }
 
