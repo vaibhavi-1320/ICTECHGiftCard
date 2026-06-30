@@ -70,8 +70,10 @@ class AuthController extends Controller
 
         try {
             $service->createStorefrontResources($shop);
+            // Automatically register webhooks on install/re-install
+            \Illuminate\Support\Facades\Artisan::call('shopify:register-webhooks');
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::error('Storefront resources setup failed: ' . $e->getMessage());
+            \Illuminate\Support\Facades\Log::error('Storefront resources setup or webhook registration failed: ' . $e->getMessage());
         }
 
         session()->forget('shopify_oauth_state');

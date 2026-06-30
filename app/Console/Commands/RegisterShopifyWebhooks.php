@@ -49,12 +49,17 @@ class RegisterShopifyWebhooks extends Command
                 $topic = $webhook['topic'];
 
                 if (isset($existing[$topic])) {
-                    if ($this->option('force')) {
+                    $existingAddress = $existing[$topic]['address'] ?? '';
+                    if ($existingAddress !== $webhook['address']) {
+                        // Address changed (e.g. domain update). Re-register.
+                        $service->api($shop, 'DELETE', "webhooks/{$existing[$topic]['id']}.json");
+                        $this->line("  Address mismatch (existing: {$existingAddress}, new: {$webhook['address']}) → deleted old <comment>{$topic}</comment> webhook.");
+                    } else if ($this->option('force')) {
                         // Delete and re-create
                         $service->api($shop, 'DELETE', "webhooks/{$existing[$topic]['id']}.json");
                         $this->line("  Deleted old <comment>{$topic}</comment> webhook.");
                     } else {
-                        $this->line("  <comment>{$topic}</comment> already registered → skip (use --force to replace)");
+                        $this->line("  <comment>{$topic}</comment> already registered with correct address → skip");
                         continue;
                     }
                 }

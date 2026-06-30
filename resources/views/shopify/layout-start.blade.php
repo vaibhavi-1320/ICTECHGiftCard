@@ -39,9 +39,95 @@
                 grid-template-columns: 1fr;
             }
         }
+        
+        /* Save loader overlay styling */
+        .save-loader-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 999999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: all;
+        }
+        .save-loader-overlay.active {
+            opacity: 1;
+        }
+        .save-loader-container {
+            background: #ffffff;
+            padding: 32px 48px;
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            transform: scale(0.9);
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .save-loader-overlay.active .save-loader-container {
+            transform: scale(1);
+        }
+        .save-loader-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3.5px solid rgba(0, 128, 96, 0.15); /* Polaris primary green base */
+            border-top-color: #008060; /* Polaris primary green active */
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        .save-loader-text {
+            font-size: 15px;
+            font-weight: 500;
+            color: #202223;
+            font-family: 'Inter', sans-serif;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
+    <div class="save-loader-overlay" id="save-loader-overlay" style="display: none;">
+        <div class="save-loader-container">
+            <div class="save-loader-spinner"></div>
+            <div class="save-loader-text">Saving your changes...</div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('submit', (e) => {
+            const form = e.target;
+            if (form && form.getAttribute('method')?.toUpperCase() === 'POST') {
+                if (e.defaultPrevented) {
+                    return;
+                }
+                
+                if (form.dataset.submitting === 'true') {
+                    e.preventDefault();
+                    return;
+                }
+                form.dataset.submitting = 'true';
+                
+                const overlay = document.getElementById('save-loader-overlay');
+                if (overlay) {
+                    overlay.style.display = 'flex';
+                    void overlay.offsetWidth;
+                    overlay.classList.add('active');
+                }
+            }
+        }, false);
+    </script>
+
     <ui-nav-menu>
         <a href="{{ route('shopify.dashboard', request()->query(), false) }}" rel="home">ICTECHGiftCard</a>
         <a href="{{ route('shopify.dashboard', request()->query(), false) }}">Dashboard</a>
