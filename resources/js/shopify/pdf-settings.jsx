@@ -795,6 +795,7 @@ function GiftCardsList({ config }) {
                                 <th style={{ padding: '14px 16px' }}>Amount</th>
                                 <th style={{ padding: '14px 16px' }}>Prefix</th>
                                 <th style={{ padding: '14px 16px' }}>Validity</th>
+                                <th style={{ padding: '14px 16px' }}>Template</th>
                                 <th style={{ padding: '14px 16px' }}>Active</th>
                                 <th style={{ padding: '14px 16px', textAlign: 'right' }}>Actions</th>
                             </tr>
@@ -802,7 +803,7 @@ function GiftCardsList({ config }) {
                         <tbody>
                             {rows.length === 0 ? (
                                 <tr>
-                                    <td colSpan="6" style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--p-color-text-disabled)' }}>No gift cards yet.</td>
+                                    <td colSpan="7" style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--p-color-text-disabled)' }}>No gift cards yet.</td>
                                 </tr>
                             ) : rows.map((row) => (
                                 <tr key={row.id} style={{ borderTop: '1px solid var(--p-color-border-subdued)' }}>
@@ -810,6 +811,9 @@ function GiftCardsList({ config }) {
                                     <td style={{ padding: '14px 16px' }}>${Number(row.amount || 0).toFixed(2)}</td>
                                     <td style={{ padding: '14px 16px' }}>{row.codePrefix || '-'}</td>
                                     <td style={{ padding: '14px 16px' }}>{row.validityDays || 365} days</td>
+                                    <td style={{ padding: '14px 16px' }}>
+                                        <Badge tone="attention">{row.templateName || 'None'}</Badge>
+                                    </td>
                                     <td style={{ padding: '14px 16px' }}>
                                         <Badge tone={row.active ? 'success' : 'attention'}>{row.active ? 'Yes' : 'No'}</Badge>
                                     </td>
@@ -873,7 +877,10 @@ function GiftCardFormIsland({ config }) {
     const [amount, setAmount] = React.useState(config.amount || '');
     const [codePrefix, setCodePrefix] = React.useState(config.codePrefix || '');
     const [validityDays, setValidityDays] = React.useState(config.validityDays || 365);
-    const [templateId, setTemplateId] = React.useState(String(config.templateId || ''));
+    
+    const templatesList = config.templates || [];
+    const defaultTemplateId = templatesList.length > 0 ? String(templatesList[0].id) : '';
+    const [templateId, setTemplateId] = React.useState(String(config.templateId || defaultTemplateId));
     const [active, setActive] = React.useState(Boolean(config.active));
 
     return (
@@ -898,10 +905,7 @@ function GiftCardFormIsland({ config }) {
                             <Layout.Section variant="oneHalf">
                                 <Select
                                     label="Template"
-                                    options={[
-                                        { label: 'None', value: '' },
-                                        ...(config.templates || []).map((template) => ({ label: template.name, value: String(template.id) })),
-                                    ]}
+                                    options={templatesList.map((template) => ({ label: template.name, value: String(template.id) }))}
                                     value={templateId}
                                     onChange={setTemplateId}
                                 />

@@ -186,4 +186,68 @@ class GiftCardAppTest extends TestCase
         $this->assertEquals(50.00, $tx->balance_before);
         $this->assertEquals(30.00, $tx->balance_after);
     }
+
+    public function test_webhook_processing_generates_voucher_on_the_fly_when_pool_is_empty(): void
+    {
+        $shop = Shop::create([
+            'shopify_shop_id' => '123',
+            'shopify_domain' => 'test-shop.myshopify.com',
+            'access_token' => 'shpat_token',
+        ]);
+
+        $giftCard = GiftCard::create([
+            'shop_id' => $shop->id,
+            'shopify_product_id' => 'prod-123',
+            'shopify_product_variant_id' => 'var-123',
+            'name' => '$50 Gift Card',
+            'amount' => 50.00,
+            'code_prefix' => 'GC',
+            'validity_days' => 365,
+            'active' => true,
+        ]);
+
+        // Mock Shopify API PriceRule & Discount Code creation calls
+        Http::fake([
+            'https://test-shop.myshopify.com/admin/api/*/price_rules.json' => Http::response([
+                'price_rule' => ['id' => 999]
+            ], 200),
+            'https://test-shop.myshopify.com/admin/api/*/price_rules/999/discount_codes.json' => Http::response([
+                'discount_code' => ['id' => 888]
+            ], 200),
+        ]);
+
+        $payload = [
+            'id' => 'order-777-fly',
+            'financial_status' => 'paid',
+            'currency' => 'USD',
+            'customer' => ['id' => 'cust-123', 'email' => 'buyer@example.com'],
+            'line_items' => [
+                [
+                    'id' => 'item-123',
+                    'variant_id' => 'var-123',
+                    'quantity' => 1,
+                    'properties' => [
+                        ['name' => 'Recipient Name', 'value' => 'Alice Recipient'],
+                        ['name' => 'Recipient Email', 'value' => 'alice@example.com'],
+                        ['name' => 'Sender Name', 'value' => 'Bob Sender'],
+                        ['name' => 'Personal Message', 'value' => 'Happy birthday!'],
+                        ['name' => 'Scheduled Send Date', 'value' => now()->format('Y-m-d')],
+                    ]
+                ]
+            ]
+        ];
+
+        // Process webhook job
+        $job = new ProcessShopifyOrderJob($payload, 'test-shop.myshopify.com');
+        dispatch($job);
+
+        // Verify voucher is created on-the-fly and assigned
+        $voucher = GiftCardVoucher::where('shopify_order_id', 'order-777-fly')->first();
+        $this->assertNotNull($voucher);
+        $this->assertSame('Alice Recipient', $voucher->recipient_name);
+        $this->assertSame('alice@example.com', $voucher->recipient_email);
+        $this->assertSame('Bob Sender', $voucher->sender_name);
+        $this->assertSame('unused', $voucher->status);
+        $this->assertStringStartsWith('GC-', $voucher->code);
+    }
 }

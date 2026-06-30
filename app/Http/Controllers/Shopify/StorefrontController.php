@@ -20,14 +20,40 @@ class StorefrontController extends Controller
                 ->get();
         }
 
+        // Get only active gift cards that are associated with a template
         $activeGiftCards = \App\Models\GiftCard::where('active', true)
-            ->latest()
+            ->whereNotNull('template_id')
+            ->with('template')
             ->get();
 
+        // Group by template_id
+        $templates = $activeGiftCards->groupBy('template_id')->map(function ($giftCards, $templateId) {
+            $template = $giftCards->first()->template;
+            if (!$template) {
+                return null;
+            }
+
+            // Map the gift cards associated with this template to their amounts and variant IDs
+            $amounts = $giftCards->map(function ($gc) {
+                return [
+                    'id' => $gc->id,
+                    'amount' => (float) $gc->amount,
+                    'variant_id' => $gc->shopify_product_variant_id,
+                ];
+            })->sortBy('amount')->values();
+
+            return [
+                'id' => $template->id,
+                'name' => $template->name,
+                'media_url' => $template->media_url,
+                'amounts' => $amounts,
+            ];
+        })->filter()->values();
+
         $content = view('shopify.storefront.customer-vouchers', [
-            'vouchers'       => $vouchers,
-            'activeGiftCards' => $activeGiftCards,
-            'isLoggedIn'     => !empty($customerId),
+            'vouchers'   => $vouchers,
+            'templates'  => $templates,
+            'isLoggedIn' => !empty($customerId),
         ])->render();
 
         return response($content, 200)
