@@ -80,8 +80,8 @@ class GiftCardController extends Controller
             Log::error('Gift card product sync failed (POST): ' . $e->getMessage(), ['exception' => $e]);
         }
 
-        // Generate voucher pool
-        $this->generateVoucherPool($giftCard);
+        // Generate voucher pool (Disabled to prevent creating 25 empty entries; vouchers will be generated on-the-fly when ordered)
+        // $this->generateVoucherPool($giftCard);
 
         try {
             $shopifyService->createStorefrontResources($shop);
