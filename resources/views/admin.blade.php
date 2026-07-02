@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dashboard - ICTECH Gift Card</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="shopify-api-key" content="{{ config('shopify.api_key') }}" />
     <link rel="stylesheet" href="https://unpkg.com/@shopify/polaris@12.0.0/build/esm/styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -70,6 +71,7 @@
         <a href="{{ route('shopify.gift-cards.index', request()->query(), false) }}">Gift Cards</a>
         <a href="{{ route('shopify.templates.index', request()->query(), false) }}">Templates</a>
         <a href="{{ route('shopify.settings.edit', request()->query(), false) }}">Settings</a>
+        <a href="{{ route('shopify.moderation.index', request()->query(), false) }}">Moderation Tool</a>
     </ui-nav-menu>
 
     <ui-title-bar title="Dashboard"></ui-title-bar>

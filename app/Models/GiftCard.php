@@ -35,6 +35,11 @@ class GiftCard extends Model
         return $this->belongsTo(GiftCardTemplate::class, 'template_id');
     }
 
+    public function shop(): BelongsTo
+    {
+        return $this->belongsTo(Shop::class, 'shop_id');
+    }
+
     public function vouchers(): HasMany
     {
         return $this->hasMany(GiftCardVoucher::class);

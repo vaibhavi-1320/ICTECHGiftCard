@@ -131,6 +131,12 @@ class GiftCardController extends Controller
     public function destroy(Request $request, GiftCard $giftCard, ShopifyService $shopifyService): RedirectResponse
     {
         $shop = $this->resolveShop($request->string('shop')->toString());
+
+        // Check if this gift card has already been purchased
+        if (\App\Models\GiftCardVoucher::where('gift_card_id', $giftCard->id)->exists()) {
+            return redirect()->route('shopify.gift-cards.index', $request->query())
+                ->with('error', 'This gift card has already been purchased and cannot be deleted.');
+        }
  
         if ($shop && $giftCard->shopify_product_id) {
             try {

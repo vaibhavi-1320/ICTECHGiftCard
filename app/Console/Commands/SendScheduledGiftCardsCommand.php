@@ -15,6 +15,8 @@ class SendScheduledGiftCardsCommand extends Command
 
     public function handle(): void
     {
+
+        // $today = '2026-07-01';
         $today = now()->format('Y-m-d');
 
         $vouchers = GiftCardVoucher::where('status', 'unused')
@@ -29,13 +31,11 @@ class SendScheduledGiftCardsCommand extends Command
 
         foreach ($vouchers as $voucher) {
             try {
-                Mail::to($voucher->recipient_email)->send(new GiftCardMail($voucher));
-                $voucher->sent_at = now();
-                $voucher->save();
-                $this->info("Sent gift card {$voucher->code} to {$voucher->recipient_email}");
+                \App\Jobs\SendGiftCardEmailJob::dispatch($voucher->id);
+                $this->info("Dispatched email sending job for gift card {$voucher->code} to {$voucher->recipient_email}");
             } catch (\Throwable $e) {
-                Log::error("SendScheduledGiftCardsCommand: Failed sending voucher {$voucher->id}: " . $e->getMessage());
-                $this->error("Failed sending voucher {$voucher->id}: " . $e->getMessage());
+                Log::error("SendScheduledGiftCardsCommand: Failed dispatching job for voucher {$voucher->id}: " . $e->getMessage());
+                $this->error("Failed dispatching job for voucher {$voucher->id}: " . $e->getMessage());
             }
         }
     }

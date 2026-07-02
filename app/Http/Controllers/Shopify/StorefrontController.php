@@ -233,4 +233,202 @@ class StorefrontController extends Controller
             ->header('Content-Type', $type)
             ->header('Cache-Control', 'public, max-age=86400');
     }
+
+    public function openGiftCard(string $secureToken): Response
+    {
+        $voucher = GiftCardVoucher::where('metadata->secure_token', $secureToken)->firstOrFail();
+        $giftCard = $voucher->giftCard;
+        $template = $giftCard?->template;
+        $shop = $giftCard?->shop;
+
+        // Resolve template image
+        $templateImagePath = $voucher->metadata['template_image_url'] ?? null;
+        $templateMediaUrl  = null;
+
+        if ($template?->media_url) {
+            $templateMediaUrl = \Illuminate\Support\Facades\Storage::disk('public')->url($template->media_url);
+        } elseif ($templateImagePath) {
+            if (filter_var($templateImagePath, FILTER_VALIDATE_URL)) {
+                $templateMediaUrl = $templateImagePath;
+            } else {
+                $templateMediaUrl = \Illuminate\Support\Facades\Storage::disk('public')->url($templateImagePath);
+            }
+        }
+
+        $shopName = $shop ? $shop->shopify_domain : 'Our Store';
+
+        return response(view('shopify.storefront.open-gift-card', [
+            'voucher'          => $voucher,
+            'template'         => $template,
+            'templateMediaUrl' => $templateMediaUrl,
+            'shop'             => $shop,
+            'shopName'         => $shopName,
+            'secureToken'      => $secureToken,
+        ])->render(), 200)->header('Content-Type', 'text/html');
+    }
+
+    public function downloadPdf(string $secureToken): Response
+    {
+        $voucher = GiftCardVoucher::where('metadata->secure_token', $secureToken)->firstOrFail();
+        $shop = $voucher->giftCard?->shop;
+        $shopName = $shop ? $shop->shopify_domain : 'Our Store';
+
+        $pdfService = app(\App\Services\GiftCardPdfService::class);
+        $pdfData = $pdfService->generate($voucher, $shopName);
+
+        return response($pdfData, 200, [
+            'Content-Type'        => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="GiftCard-' . $voucher->code . '.pdf"',
+        ]);
+    }
+
+    public function validateGiftCard(Request $request): Response
+    {
+        $code = strtoupper(trim($request->input('code', '')));
+        $cartTotal = (float) $request->input('cart_total', 0);
+        $shopDomain = $request->query('shop') ?: $request->input('shop');
+
+        if (empty($code)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please enter a gift card code.'
+            ], 400);
+        }
+
+        $shop = \App\Models\Shop::where('shopify_domain', $shopDomain)->first();
+        if (!$shop) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Store not found.'
+            ], 400);
+        }
+
+        $voucher = GiftCardVoucher::where('code', $code)
+            ->whereIn('status', ['unused', 'delivered', 'partially_used'])
+            ->whereDate('expires_at', '>=', now()->format('Y-m-d'))
+            ->first();
+
+        if (!$voucher) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid, expired, or fully used gift card.'
+            ], 400);
+        }
+
+        $today = now()->format('Y-m-d');
+        if (\Carbon\Carbon::parse($voucher->scheduled_send_date)->format('Y-m-d') > $today) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This gift card is not active yet.'
+            ], 400);
+        }
+
+        if ($voucher->remaining_balance <= 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'This gift card has no remaining balance.'
+            ], 400);
+        }
+
+        // Calculate discount amount
+        $discountAmount = min($cartTotal, (float) $voucher->remaining_balance);
+        if ($discountAmount <= 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cart total must be greater than 0.'
+            ], 400);
+        }
+
+        // Generate temporary Shopify PriceRule & Discount Code
+        $shopifyService = app(\App\Services\Shopify\ShopifyService::class);
+        
+        $tempCode = 'GC-TEMP-' . $voucher->code . '-' . strtoupper(bin2hex(random_bytes(3)));
+
+        // Create Shopify Price Rule
+        $priceRulePayload = [
+            'price_rule' => [
+                'title' => $tempCode,
+                'target_type' => 'line_item',
+                'target_selection' => 'all',
+                'allocation_method' => 'across',
+                'value_type' => 'fixed_amount',
+                'value' => '-' . number_format($discountAmount, 2, '.', ''),
+                'customer_selection' => 'all',
+                'starts_at' => now()->toIso8601String(),
+                'ends_at' => now()->addDay()->toIso8601String(), // Expires in 24 hours
+                'usage_limit' => 1,
+            ]
+        ];
+
+        try {
+            $prResponse = $shopifyService->api($shop, 'POST', 'price_rules.json', $priceRulePayload);
+            if (!$prResponse->successful()) {
+                \Illuminate\Support\Facades\Log::error('ValidateGiftCard: Shopify Price Rule creation failed', ['response' => $prResponse->body()]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Could not apply gift card on Shopify. Please try again.'
+                ], 500);
+            }
+
+            $prData = $prResponse->json();
+            $priceRuleId = $prData['price_rule']['id'];
+
+            // Create Shopify Discount Code
+            $dcPayload = [
+                'discount_code' => [
+                    'code' => $tempCode
+                ]
+            ];
+            $dcResponse = $shopifyService->api($shop, 'POST', "price_rules/{$priceRuleId}/discount_codes.json", $dcPayload);
+            if (!$dcResponse->successful()) {
+                \Illuminate\Support\Facades\Log::error('ValidateGiftCard: Shopify Discount Code creation failed', ['response' => $dcResponse->body()]);
+                // Cleanup price rule
+                $shopifyService->api($shop, 'DELETE', "price_rules/{$priceRuleId}.json");
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Could not generate discount code. Please try again.'
+                ], 500);
+            }
+
+            return response()->json([
+                'success' => true,
+                'discount_code' => $tempCode,
+                'price_rule_id' => $priceRuleId,
+                'discount_amount' => $discountAmount,
+                'original_balance' => (float) $voucher->remaining_balance,
+                'remaining_balance' => max(0.0, (float) $voucher->remaining_balance - $discountAmount),
+            ]);
+
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('ValidateGiftCard Exception: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred during gift card application.'
+            ], 500);
+        }
+    }
+
+    public function removeGiftCard(Request $request): Response
+    {
+        $priceRuleId = $request->input('price_rule_id');
+        $shopDomain = $request->query('shop') ?: $request->input('shop');
+
+        if (!$priceRuleId) {
+            return response()->json(['success' => true]);
+        }
+
+        $shop = \App\Models\Shop::where('shopify_domain', $shopDomain)->first();
+        if (!$shop) {
+            return response()->json(['success' => false, 'message' => 'Store not found.'], 400);
+        }
+
+        $shopifyService = app(\App\Services\Shopify\ShopifyService::class);
+        try {
+            $shopifyService->api($shop, 'DELETE', "price_rules/{$priceRuleId}.json");
+            return response()->json(['success' => true]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('RemoveGiftCard Exception: ' . $e->getMessage());
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+        }
+    }
 }

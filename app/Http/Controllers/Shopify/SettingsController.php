@@ -91,4 +91,52 @@ class SettingsController extends Controller
         return redirect()->route('shopify.settings.edit', $request->query())
             ->with('status', 'Settings updated.');
     }
+
+    public function cleanUpStorefront(Request $request): RedirectResponse
+    {
+        $shopDomain = $request->string('shop')->toString();
+        $shop = Shop::where('shopify_domain', $shopDomain)->firstOrFail();
+
+        try {
+            // 1. Remove page and navigation link from Shopify storefront (while token is valid)
+            $shopifyService = app(\App\Services\Shopify\ShopifyService::class);
+            $shopifyService->removeStorefrontResources($shop);
+
+            // 2. Trigger programmatic uninstall via Shopify GraphQL API
+            $uninstallMutation = [
+                'query' => 'mutation {
+                    appUninstall {
+                        userErrors {
+                            field
+                            message
+                        }
+                    }
+                }'
+            ];
+            
+            $uninstallResponse = $shopifyService->api($shop, 'POST', 'graphql.json', $uninstallMutation);
+            
+            if ($uninstallResponse->successful()) {
+                // Shopify will process uninstall and send app/uninstalled webhook, which clears DB.
+                // We redirect to our public informational success page.
+                return redirect()->route('shopify.uninstalled', ['shop' => $shopDomain]);
+            } else {
+                \Illuminate\Support\Facades\Log::error('Failed to trigger appUninstall mutation: ' . $uninstallResponse->body());
+                return redirect()->route('shopify.settings.edit', $request->query())
+                    ->with('error', 'Storefront cleaned, but failed to trigger Shopify uninstall. You can now uninstall manually from Shopify admin.');
+            }
+
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Error during cleanup & uninstall: ' . $e->getMessage());
+            return redirect()->route('shopify.settings.edit', $request->query())
+                ->with('error', 'Failed to complete cleanup: ' . $e->getMessage());
+        }
+    }
+
+    public function uninstalledPage(Request $request): View
+    {
+        return view('shopify.uninstalled', [
+            'shopDomain' => $request->string('shop')->toString()
+        ]);
+    }
 }

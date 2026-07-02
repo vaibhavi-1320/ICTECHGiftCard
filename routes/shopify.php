@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/shopify/install', [AuthController::class, 'install'])->name('shopify.install');
 Route::get('/shopify/callback', [AuthController::class, 'callback'])->name('shopify.callback');
+Route::get('/shopify/uninstalled', [\App\Http\Controllers\Shopify\SettingsController::class, 'uninstalledPage'])->name('shopify.uninstalled');
 Route::get('/shopify/app', AppController::class)->middleware('shopify.session')->name('shopify.app');
 Route::get('/shopify/dashboard', AppController::class)->middleware('shopify.session')->name('shopify.dashboard');
 
@@ -29,6 +30,13 @@ Route::prefix('/shopify')->name('shopify.')->middleware('shopify.session')->grou
 
     Route::get('/settings', [\App\Http\Controllers\Shopify\SettingsController::class, 'edit'])->name('settings.edit');
     Route::put('/settings', [\App\Http\Controllers\Shopify\SettingsController::class, 'update'])->name('settings.update');
+    Route::post('/settings/cleanup', [\App\Http\Controllers\Shopify\SettingsController::class, 'cleanUpStorefront'])->name('settings.cleanup');
+
+    Route::get('/moderation', [\App\Http\Controllers\Shopify\ModerationController::class, 'index'])->name('moderation.index');
+    Route::get('/moderation/search', [\App\Http\Controllers\Shopify\ModerationController::class, 'search'])->name('moderation.search');
+    Route::post('/moderation/resend-email', [\App\Http\Controllers\Shopify\ModerationController::class, 'resendEmail'])->name('moderation.resend-email');
+    Route::post('/moderation/adjust-balance', [\App\Http\Controllers\Shopify\ModerationController::class, 'adjustBalance'])->name('moderation.adjust-balance');
+    Route::post('/moderation/revoke', [\App\Http\Controllers\Shopify\ModerationController::class, 'revoke'])->name('moderation.revoke');
 
     Route::get('/dashboard/purchased-export', [\App\Http\Controllers\Shopify\AppController::class, 'purchasedExport'])->name('dashboard.purchased-export');
     Route::get('/dashboard/used-export', [\App\Http\Controllers\Shopify\AppController::class, 'usedExport'])->name('dashboard.used-export');
@@ -46,3 +54,8 @@ Route::middleware('shopify.proxy')->group(function (): void {
 
 Route::post('/webhooks/orders-created', [WebhookController::class, 'ordersCreated'])->middleware('shopify.webhook')->name('shopify.webhooks.orders-created');
 Route::post('/webhooks/orders-paid', [WebhookController::class, 'ordersPaid'])->middleware('shopify.webhook')->name('shopify.webhooks.orders-paid');
+Route::post('/webhooks/customers/data-request', [WebhookController::class, 'customersDataRequest'])->middleware('shopify.webhook');
+Route::post('/webhooks/customers/redact', [WebhookController::class, 'customersRedact'])->middleware('shopify.webhook');
+Route::post('/webhooks/shop/redact', [WebhookController::class, 'shopRedact'])->middleware('shopify.webhook');
+Route::post('/webhooks/app/uninstalled', [WebhookController::class, 'appUninstalled'])->middleware('shopify.webhook');
+Route::post('/webhooks/compliance', [WebhookController::class, 'compliance'])->middleware('shopify.webhook');

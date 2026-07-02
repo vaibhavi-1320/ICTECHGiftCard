@@ -363,4 +363,24 @@
         </div>
     </form>
 
+    <form id="cleanup-form" method="POST" action="{{ route('shopify.settings.cleanup', request()->query(), false) }}" style="display: none;">
+        @csrf
+    </form>
+
+    <!-- App Uninstall Clean-up Card -->
+    <div class="Polaris-Card" style="margin-top: 20px; margin-bottom: 20px; border: 1px solid var(--p-color-border-critical);">
+        <div class="Polaris-Card__Header" style="padding: 16px;">
+            <h2 class="Polaris-Text--headingMd" style="color: var(--p-color-text-critical);">App Uninstall Storefront Clean-up</h2>
+        </div>
+        <div class="Polaris-Card__Section" style="border-top: 1px solid var(--p-color-border-subdued); padding: 16px;">
+            <p style="margin-bottom: 16px; color: var(--p-color-text-secondary);">
+                Shopify immediately revokes API permissions when you delete an app, which prevents us from cleaning up the generated pages or navigation links after uninstallation.
+                <strong>Before you uninstall this app</strong>, click the button below to automatically remove the "Gift Card" page and the navigation menu link from your storefront.
+            </p>
+            <button type="button" class="Polaris-Button" style="background: #d82c0d; border-color: #d82c0d; color: white; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600;" onclick="if(confirm('Are you sure you want to remove the storefront Gift Card page and navigation menu link? This will disable the customer-facing purchase form. This action will also automatically uninstall the app.')) { document.getElementById('cleanup-form').submit(); }">
+                Clean Storefront & Uninstall App
+            </button>
+        </div>
+    </div>
+
 @include('shopify.layout-end')

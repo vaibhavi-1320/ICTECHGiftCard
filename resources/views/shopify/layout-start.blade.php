@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ $title ?? 'ICTECH Gift Card' }}</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="shopify-api-key" content="{{ config('shopify.api_key') }}" />
     <link rel="stylesheet" href="https://unpkg.com/@shopify/polaris@12.0.0/build/esm/styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -27,6 +28,45 @@
             color: var(--p-color-text-success, #1e5e41);
             margin-bottom: 20px;
             font-size: 14px;
+            opacity: 1;
+            transition: opacity 0.5s ease, margin-bottom 0.5s ease, padding 0.5s ease, height 0.5s ease, border-width 0.5s ease;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+        .notice-banner.fade-out {
+            opacity: 0 !important;
+            margin-bottom: 0 !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+            height: 0 !important;
+            border-top-width: 0 !important;
+            border-bottom-width: 0 !important;
+            border-left-width: 0 !important;
+            border-right-width: 0 !important;
+        }
+        .error-banner {
+            padding: 12px 16px;
+            background-color: var(--p-color-bg-surface-critical, #fedad7);
+            border: 1px solid var(--p-color-border-critical, #f8a19b);
+            border-radius: 6px;
+            color: var(--p-color-text-critical, #8a1715);
+            margin-bottom: 20px;
+            font-size: 14px;
+            opacity: 1;
+            transition: opacity 0.5s ease, margin-bottom 0.5s ease, padding 0.5s ease, height 0.5s ease, border-width 0.5s ease;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+        .error-banner.fade-out {
+            opacity: 0 !important;
+            margin-bottom: 0 !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+            height: 0 !important;
+            border-top-width: 0 !important;
+            border-bottom-width: 0 !important;
+            border-left-width: 0 !important;
+            border-right-width: 0 !important;
         }
         /* Custom helper classes for grid/form elements matching Polaris */
         .polaris-form-grid {
@@ -105,6 +145,20 @@
     </div>
 
     <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const banners = document.querySelectorAll('.notice-banner, .error-banner');
+            banners.forEach(banner => {
+                setTimeout(() => {
+                    banner.style.height = banner.offsetHeight + 'px';
+                    void banner.offsetHeight; // Force reflow
+                    banner.classList.add('fade-out');
+                    setTimeout(() => {
+                        banner.remove();
+                    }, 500);
+                }, 4000); // 4 seconds for error visibility
+            });
+        });
+
         document.addEventListener('submit', (e) => {
             const form = e.target;
             if (form && form.getAttribute('method')?.toUpperCase() === 'POST') {
@@ -134,6 +188,7 @@
         <a href="{{ route('shopify.gift-cards.index', request()->query(), false) }}">Gift Cards</a>
         <a href="{{ route('shopify.templates.index', request()->query(), false) }}">Templates</a>
         <a href="{{ route('shopify.settings.edit', request()->query(), false) }}">Settings</a>
+        <a href="{{ route('shopify.moderation.index', request()->query(), false) }}">Moderation Tool</a>
     </ui-nav-menu>
 
     <div class="Polaris-Page">
@@ -141,5 +196,17 @@
             @if (session('status'))
                 <div class="notice-banner">
                     {{ session('status') }}
+                </div>
+            @endif
+
+            @if (session('error'))
+                <div class="error-banner">
+                    {{ session('error') }}
+                </div>
+            @endif
+
+            @if ($errors->any())
+                <div class="error-banner">
+                    {{ $errors->first() }}
                 </div>
             @endif

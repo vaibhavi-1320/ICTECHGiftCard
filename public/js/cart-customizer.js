@@ -116,7 +116,6 @@
             return;
           }
 
-          
           var cartEl = cartItemEls[index];
           if (!cartEl) {
             return;

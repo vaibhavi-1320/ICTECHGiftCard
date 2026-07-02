@@ -11,6 +11,8 @@ class GiftCardTransaction extends Model
         'voucher_id',
         'shopify_order_id',
         'shopify_customer_id',
+        'customer_name',
+        'customer_email',
         'amount_used',
         'balance_before',
         'balance_after',

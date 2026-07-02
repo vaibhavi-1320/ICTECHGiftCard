@@ -204,7 +204,7 @@ class ProcessShopifyOrderJob implements ShouldQueue
                         'value_type' => 'fixed_amount',
                         'value' => '-' . number_format((float) $voucher->original_amount, 2, '.', ''),
                         'customer_selection' => 'all',
-                        'starts_at' => now()->toIso8601String(),
+                        'starts_at' => Carbon::parse($voucher->scheduled_send_date)->startOfDay()->toIso8601String(),
                         'ends_at' => Carbon::parse($voucher->expires_at)->endOfDay()->toIso8601String(),
                         'usage_limit' => null,
                     ]
@@ -232,15 +232,35 @@ class ProcessShopifyOrderJob implements ShouldQueue
                     Log::error("ProcessShopifyOrderJob: Failed to create Price Rule or Discount Code on Shopify for code {$voucher->code}: " . $e->getMessage());
                 }
 
-                // Send email immediately if scheduled for today or earlier
+                // Dispatch email sending job immediately if scheduled for today or earlier
                 $today = now()->format('Y-m-d');
                 if ($voucher->recipient_email && Carbon::parse($voucher->scheduled_send_date)->format('Y-m-d') <= $today) {
-                    try {
-                        Mail::to($voucher->recipient_email)->send(new GiftCardMail($voucher));
-                        $voucher->sent_at = now();
-                        $voucher->save();
-                    } catch (\Throwable $e) {
-                        Log::error("ProcessShopifyOrderJob: Failed to send gift card email for voucher {$voucher->id}: " . $e->getMessage());
+                    \App\Jobs\SendGiftCardEmailJob::dispatch($voucher->id);
+                } else {
+                    // Send scheduled confirmation email ONLY to the purchaser (buyer)
+                    $purchEmail = trim(strtolower($customerEmail));
+                    if (!empty($purchEmail)) {
+                        try {
+                            $shopName = $shop->shopify_domain;
+                            $shopLogoUrl = null;
+                            try {
+                                $response = $shopifyService->api($shop, 'GET', 'shop.json');
+                                if ($response->successful()) {
+                                    $shopData = $response->json('shop');
+                                    $shopName = $shopData['name'] ?? $shop->shopify_domain;
+                                }
+                            } catch (\Throwable $se) {
+                                Log::error("ProcessShopifyOrderJob: Failed to fetch shop details: " . $se->getMessage());
+                            }
+
+                            Mail::to($purchEmail)->send(new \App\Mail\PurchaserScheduledConfirmationMail(
+                                $voucher,
+                                $shopName,
+                                $shopLogoUrl
+                            ));
+                        } catch (\Throwable $e) {
+                            Log::error("ProcessShopifyOrderJob: Failed to send scheduled confirmation email for voucher {$voucher->id}: " . $e->getMessage());
+                        }
                     }
                 }
             }
@@ -250,7 +270,23 @@ class ProcessShopifyOrderJob implements ShouldQueue
     private function processRedemptions(Shop $shop, string $orderId, ShopifyService $shopifyService): void
     {
         $customerId = $this->payload['customer']['id'] ?? null;
+        $customerFirstName = $this->payload['customer']['first_name'] ?? '';
+        $customerLastName = $this->payload['customer']['last_name'] ?? '';
+        $customerName = trim($customerFirstName . ' ' . $customerLastName) ?: null;
+        $customerEmail = $this->payload['customer']['email'] ?? null;
         $orderNumber = $this->payload['name'] ?? $this->payload['order_number'] ?? null;
+
+        // Extract attributes from note_attributes
+        $attrOriginalCode = null;
+        $tempPriceRuleId = null;
+        foreach ($this->payload['note_attributes'] ?? [] as $attr) {
+            if (($attr['name'] ?? '') === '_gift_card_code') {
+                $attrOriginalCode = strtoupper(trim($attr['value'] ?? ''));
+            }
+            if (($attr['name'] ?? '') === '_gift_card_price_rule_id') {
+                $tempPriceRuleId = trim($attr['value'] ?? '');
+            }
+        }
 
         foreach ($this->payload['discount_codes'] ?? [] as $dc) {
             $code = strtoupper(trim($dc['code'] ?? ''));
@@ -258,11 +294,28 @@ class ProcessShopifyOrderJob implements ShouldQueue
                 continue;
             }
 
-            $voucher = GiftCardVoucher::where('code', $code)
-                ->whereIn('status', ['unused', 'partially_used'])
+            $extractedCode = $code;
+            $isTemporary = false;
+
+            if (str_starts_with($code, 'GC-TEMP-')) {
+                $isTemporary = true;
+                if (preg_match('/^GC-TEMP-(.+)-[A-Z0-9]{6}$/i', $code, $matches)) {
+                    $extractedCode = strtoupper($matches[1]);
+                }
+            }
+
+            $lookupCode = $attrOriginalCode ?: $extractedCode;
+
+            $voucher = GiftCardVoucher::where('code', $lookupCode)
+                ->whereIn('status', ['unused', 'delivered', 'partially_used'])
                 ->first();
 
             if (!$voucher) {
+                continue;
+            }
+
+            if (Carbon::parse($voucher->scheduled_send_date)->format('Y-m-d') > now()->format('Y-m-d')) {
+                Log::warning("ProcessShopifyOrderJob: Voucher {$voucher->code} cannot be redeemed because its scheduled send date {$voucher->scheduled_send_date} is in the future.");
                 continue;
             }
 
@@ -302,38 +355,73 @@ class ProcessShopifyOrderJob implements ShouldQueue
             if ($amountUsed > 0.0) {
                 $balanceBefore = $voucher->remaining_balance;
                 $balanceAfter = max(0.0, $balanceBefore - $amountUsed);
+                $oldStatus = $voucher->status;
+                $newStatus = $balanceAfter <= 0.0 ? 'used' : 'partially_used';
 
+                // Log the transaction
                 GiftCardTransaction::create([
                     'voucher_id' => $voucher->id,
                     'shopify_order_id' => $orderId,
                     'shopify_customer_id' => $customerId,
+                    'customer_name' => $customerName,
+                    'customer_email' => $customerEmail,
                     'amount_used' => $amountUsed,
                     'balance_before' => $balanceBefore,
                     'balance_after' => $balanceAfter
                 ]);
 
+                // Update the voucher
                 $voucher->remaining_balance = $balanceAfter;
                 $voucher->used_in_order_number = $orderNumber;
-                $voucher->status = $balanceAfter <= 0.0 ? 'used' : 'partially_used';
+                $voucher->status = $newStatus;
                 $voucher->save();
 
-                // Sync new balance or delete discount code on Shopify
-                $priceRuleId = $voucher->metadata['shopify_price_rule_id'] ?? null;
-                if ($priceRuleId) {
-                    try {
-                        if ($balanceAfter <= 0.0) {
-                            $shopifyService->api($shop, 'DELETE', "price_rules/{$priceRuleId}.json");
-                        } else {
-                            $updatePayload = [
-                                'price_rule' => [
-                                    'id' => $priceRuleId,
-                                    'value' => '-' . number_format($balanceAfter, 2, '.', ''),
-                                ]
-                            ];
-                            $shopifyService->api($shop, 'PUT', "price_rules/{$priceRuleId}.json", $updatePayload);
+                // Save Audit Log
+                \App\Models\GiftCardAuditLog::create([
+                    'voucher_id' => $voucher->id,
+                    'admin_user_id' => null,
+                    'action' => 'redemption',
+                    'old_value' => [
+                        'remaining_balance' => (float) $balanceBefore,
+                        'status' => $oldStatus
+                    ],
+                    'new_value' => [
+                        'remaining_balance' => (float) $balanceAfter,
+                        'status' => $newStatus
+                    ],
+                    'reason' => 'Redeemed in order ' . ($orderNumber ?: $orderId)
+                ]);
+
+                // Cleanup Shopify PriceRule
+                if ($isTemporary) {
+                    // For temporary codes, delete the temporary Price Rule
+                    $ruleToDelete = $tempPriceRuleId ?: ($voucher->metadata['shopify_price_rule_id'] ?? null);
+                    if ($ruleToDelete) {
+                        try {
+                            $shopifyService->api($shop, 'DELETE', "price_rules/{$ruleToDelete}.json");
+                        } catch (\Throwable $e) {
+                            Log::error("ProcessShopifyOrderJob: Failed to delete temporary Price Rule {$ruleToDelete}: " . $e->getMessage());
                         }
-                    } catch (\Throwable $e) {
-                        Log::error("ProcessShopifyOrderJob: Failed to update/delete Shopify Price Rule {$priceRuleId} after redemption: " . $e->getMessage());
+                    }
+                } else {
+                    // For permanent codes, update or delete the Shopify Price Rule
+                    $priceRuleId = $voucher->metadata['shopify_price_rule_id'] ?? null;
+                    if ($priceRuleId) {
+                        try {
+                            if ($balanceAfter <= 0.0) {
+                                $shopifyService->api($shop, 'DELETE', "price_rules/{$priceRuleId}.json");
+                            } else {
+                                $updatePayload = [
+                                    'price_rule' => [
+                                        'id' => $priceRuleId,
+                                        'value' => '-' . number_format($balanceAfter, 2, '.', ''),
+                                    ]
+                                ];
+                                $shopifyService->api($shop, 'PUT', "price_rules/{$priceRuleId}.json", $updatePayload);
+                            }
+                        } catch (\Throwable $e) {
+                            Log::error("ProcessShopifyOrderJob: Failed to update/delete Shopify Price Rule {$priceRuleId} after redemption: " . $e->getMessage());
+                        }
                     }
                 }
             }

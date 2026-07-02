@@ -33,12 +33,13 @@ class AppController extends Controller
 
         $stats = [
             'totalVouchers' => $vouchersTable ? GiftCardVoucher::count() : 0,
-            'pendingVouchers' => $vouchersTable ? GiftCardVoucher::where('status', 'pending_issuance')->count() : 0,
             'redeemedAmount' => $transactionsTable ? (float) GiftCardTransaction::sum('amount_used') : 0.0,
             'expiredVouchers' => $vouchersTable
                 ? GiftCardVoucher::whereDate('expires_at', '<', now())->whereNotIn('status', ['used', 'revoked'])->count()
                 : 0,
             'totalSold' => $vouchersTable ? (float) GiftCardVoucher::where('status', '!=', 'pending_issuance')->sum('original_amount') : 0.0,
+            'usedVouchersCount' => $vouchersTable ? GiftCardVoucher::where('status', 'used')->count() : 0,
+            'partiallyUsedVouchersCount' => $vouchersTable ? GiftCardVoucher::where('status', 'partially_used')->count() : 0,
         ];
 
         // Query Gift Card Orders (Step 5)
@@ -89,6 +90,7 @@ class AppController extends Controller
                     'recipientName' => $order->recipient_name,
                     'recipientEmail' => $order->recipient_email,
                     'amount' => $order->amount,
+                    'remainingBalance' => $voucher ? (float) $voucher->remaining_balance : 0.0,
                     'templateName' => $order->template_name ?: 'Default',
                     'deliveryDate' => $order->delivery_date?->format('Y-m-d') ?: '',
                     'voucherCode' => $voucher ? $voucher->code : 'N/A',
@@ -111,6 +113,8 @@ class AppController extends Controller
         $usedRows = $usedTransactions->map(fn ($t) => [
             'id' => $t->id,
             'code' => $t->voucher?->code,
+            'customerName' => $t->customer_name ?: 'N/A',
+            'customerEmail' => $t->customer_email,
             'amountUsed' => $t->amount_used,
             'balanceBefore' => $t->balance_before,
             'balanceAfter' => $t->balance_after,

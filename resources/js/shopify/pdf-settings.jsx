@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { AppProvider, Badge, Card, Button, ButtonGroup, Select, TextField, BlockStack, InlineStack, Box, Text, Tabs, Layout, Divider, Pagination } from '@shopify/polaris';
+import { AppProvider, Badge, Card, Button, ButtonGroup, Select, TextField, BlockStack, InlineStack, Box, Text, Tabs, Layout, Divider, Pagination, Tooltip } from '@shopify/polaris';
 
 function parseConfig(raw, fallback = {}) {
     if (!raw) return fallback;
@@ -118,10 +118,11 @@ function DashboardOverview({ stats: initialStats }) {
 
     const cards = [
         { label: 'Total Vouchers', value: stats.totalVouchers, tone: 'base' },
-        { label: 'Pending Issuance', value: stats.pendingVouchers, tone: 'attention' },
+        { label: 'Used Vouchers', value: stats.usedVouchersCount || 0, tone: 'info' },
+        { label: 'Partially Used Vouchers', value: stats.partiallyUsedVouchersCount || 0, tone: 'attention' },
         { label: 'Expired Vouchers', value: stats.expiredVouchers, tone: 'critical' },
         { label: 'Total Sold', value: `$${Number(stats.totalSold || 0).toFixed(2)}`, tone: 'success' },
-        { label: 'Total Redeemed', value: `$${Number(stats.redeemedAmount || 0).toFixed(2)}`, tone: 'info' },
+        { label: 'Total Redeemed', value: `$${Number(stats.redeemedAmount || 0).toFixed(2)}`, tone: 'critical' },
         { label: 'App Status', value: 'Active', tone: 'success' },
     ];
 
@@ -129,7 +130,7 @@ function DashboardOverview({ stats: initialStats }) {
         <AppProvider i18n={{}}>
             <BlockStack gap="400">
                 <Text as="h2" variant="headingMd">Overview Statistics</Text>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '12px' }}>
                     {cards.map((card, index) => (
                         <div
                             key={card.label}
@@ -150,7 +151,7 @@ function DashboardOverview({ stats: initialStats }) {
                                 <Box padding="400">
                                     <BlockStack gap="100">
                                         <Text as="p" variant="bodySm" tone="subdued">{card.label}</Text>
-                                        <Text as="p" variant="headingLg" tone={card.tone === 'success' ? 'success' : 'base'}>{card.value}</Text>
+                                        <Text as="p" variant="headingLg" tone={card.tone}>{card.value}</Text>
                                     </BlockStack>
                                 </Box>
                             </Card>
@@ -227,9 +228,9 @@ function DashboardControls({ config, onFilterChange }) {
                                     label="Filter Status"
                                     options={[
                                         { label: 'All statuses', value: '' },
-                                        { label: 'Completed', value: 'completed' },
-                                        { label: 'Pending', value: 'pending' },
                                         { label: 'Unused', value: 'unused' },
+                                        { label: 'Delivered', value: 'delivered' },
+                                        { label: 'Partially Used', value: 'partially_used' },
                                         { label: 'Used', value: 'used' },
                                     ]}
                                     value={values.status || ''}
@@ -282,6 +283,12 @@ function DashboardTable({ config, onPageChange }) {
     const isOrders = config.title === 'Gift Card Orders';
     const [hoveredRowId, setHoveredRowId] = React.useState(null);
 
+    const formatStatus = (status) => {
+        if (!status) return '-';
+        const formatted = status.replaceAll('_', ' ');
+        return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+    };
+
     return (
         <Card>
             <Box padding="400">
@@ -296,6 +303,7 @@ function DashboardTable({ config, onPageChange }) {
                                     <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Recipient</th>
                                     <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Recipient Email</th>
                                     <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Amount</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Remaining Amount</th>
                                     <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Template</th>
                                     <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Delivery Date</th>
                                     <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Status</th>
@@ -304,6 +312,7 @@ function DashboardTable({ config, onPageChange }) {
                             ) : (
                                 <>
                                     <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Code</th>
+                                    <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Customer</th>
                                     <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Amount Used</th>
                                     <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Balance Before</th>
                                     <th style={{ padding: '14px 16px', color: 'var(--p-color-text-secondary)', fontWeight: 600, borderBottom: '2px solid var(--p-color-border-subdued)' }}>Balance After</th>
@@ -316,51 +325,86 @@ function DashboardTable({ config, onPageChange }) {
                     <tbody>
                         {rows.length === 0 ? (
                             <tr>
-                                <td colSpan={isOrders ? 10 : 6} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--p-color-text-disabled)' }}>
+                                <td colSpan={isOrders ? 11 : 7} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--p-color-text-disabled)' }}>
                                     {isOrders ? 'No gift card orders found.' : 'No redemptions found.'}
                                 </td>
                             </tr>
-                        ) : rows.map((row) => (
-                            <tr
-                                key={row.id}
-                                onMouseEnter={() => setHoveredRowId(row.id)}
-                                onMouseLeave={() => setHoveredRowId(null)}
-                                style={{
-                                    borderTop: '1px solid var(--p-color-border-subdued)',
-                                    background: hoveredRowId === row.id ? 'var(--p-color-bg-surface-hover)' : 'transparent',
-                                    transition: 'background-color 0.2s ease',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                {isOrders ? (
-                                    <>
-                                        <td style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--p-color-text)' }}>{row.shopifyOrderNumber}</td>
-                                        <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 600, color: 'var(--p-color-text)' }}>{row.voucherCode}</td>
-                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.customerName || '-'}</td>
-                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.recipientName || '-'}</td>
-                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.recipientEmail || '-'}</td>
-                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)', fontWeight: 600 }}>${Number(row.amount || 0).toFixed(2)}</td>
-                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.templateName}</td>
-                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.deliveryDate || '-'}</td>
-                                        <td style={{ padding: '14px 16px' }}>
-                                            <Badge tone={row.voucherStatus === 'used' ? 'critical' : row.voucherStatus === 'unused' ? 'success' : 'attention'}>
-                                                {String(row.voucherStatus || '').replaceAll('_', ' ')}
-                                            </Badge>
-                                        </td>
-                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.createdAt || '-'}</td>
-                                    </>
-                                ) : (
-                                    <>
-                                        <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 600, color: 'var(--p-color-text)' }}>{row.code || 'Deleted'}</td>
-                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text-critical)', fontWeight: 600 }}>-${Number(row.amountUsed || 0).toFixed(2)}</td>
-                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>${Number(row.balanceBefore || 0).toFixed(2)}</td>
-                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>${Number(row.balanceAfter || 0).toFixed(2)}</td>
-                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.orderId || '-'}</td>
-                                        <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.createdAt || '-'}</td>
-                                    </>
-                                )}
-                            </tr>
-                        ))}
+                        ) : rows.map((row) => {
+                            const isPartial = !isOrders && Number(row.balanceAfter || 0) > 0;
+                            const amountColor = isPartial ? '#b87a00' : 'var(--p-color-text-critical)';
+                            const amountUsedValue = Number(row.amountUsed || 0).toFixed(2);
+
+                            return (
+                                <tr
+                                    key={row.id}
+                                    onMouseEnter={() => setHoveredRowId(row.id)}
+                                    onMouseLeave={() => setHoveredRowId(null)}
+                                    style={{
+                                        borderTop: '1px solid var(--p-color-border-subdued)',
+                                        background: hoveredRowId === row.id ? 'var(--p-color-bg-surface-hover)' : 'transparent',
+                                        transition: 'background-color 0.2s ease',
+                                        cursor: 'pointer'
+                                    }}
+                                >
+                                    {isOrders ? (
+                                        <>
+                                            <td style={{ padding: '14px 16px', fontWeight: 600, color: 'var(--p-color-text)' }}>{row.shopifyOrderNumber}</td>
+                                            <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 600, color: 'var(--p-color-text)' }}>{row.voucherCode}</td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.customerName || '-'}</td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.recipientName || '-'}</td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.recipientEmail || '-'}</td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)', fontWeight: 600 }}>${Number(row.amount || 0).toFixed(2)}</td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)', fontWeight: 600 }}>${Number(row.remainingBalance || 0).toFixed(2)}</td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.templateName}</td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.deliveryDate || '-'}</td>
+                                            <td style={{ padding: '14px 16px' }}>
+                                                {row.voucherStatus === 'partially_used' ? (
+                                                    <Tooltip content={`$${Number(row.amount - (row.remainingBalance || 0)).toFixed(2)} used`}>
+                                                        <Badge tone="attention">
+                                                            {formatStatus(row.voucherStatus)}
+                                                        </Badge>
+                                                    </Tooltip>
+                                                ) : (
+                                                    <Badge tone={
+                                                        row.voucherStatus === 'used' ? 'critical' :
+                                                        row.voucherStatus === 'unused' ? 'success' :
+                                                        row.voucherStatus === 'delivered' ? 'info' : 'attention'
+                                                    }>
+                                                        {formatStatus(row.voucherStatus)}
+                                                    </Badge>
+                                                )}
+                                            </td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.createdAt || '-'}</td>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <td style={{ padding: '14px 16px', fontFamily: 'monospace', fontWeight: 600, color: 'var(--p-color-text)' }}>{row.code || 'Deleted'}</td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>
+                                                <div>{row.customerName || 'N/A'}</div>
+                                                {row.customerEmail && <div style={{ fontSize: '12px', color: 'var(--p-color-text-secondary)' }}>{row.customerEmail}</div>}
+                                            </td>
+                                            <td style={{ padding: '14px 16px' }}>
+                                                {isPartial ? (
+                                                    <Tooltip content={`$${amountUsedValue} used`}>
+                                                        <span style={{ color: amountColor, fontWeight: 600, cursor: 'help' }}>
+                                                            -${amountUsedValue}
+                                                        </span>
+                                                    </Tooltip>
+                                                ) : (
+                                                    <span style={{ color: amountColor, fontWeight: 600 }}>
+                                                        -${amountUsedValue}
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>${Number(row.balanceBefore || 0).toFixed(2)}</td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>${Number(row.balanceAfter || 0).toFixed(2)}</td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.orderId || '-'}</td>
+                                            <td style={{ padding: '14px 16px', color: 'var(--p-color-text)' }}>{row.createdAt || '-'}</td>
+                                        </>
+                                    )}
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
             </Box>

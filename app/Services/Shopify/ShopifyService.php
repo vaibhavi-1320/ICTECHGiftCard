@@ -191,6 +191,44 @@ class ShopifyService
                         $jsPath = public_path('js/cart-customizer.js');
                         if (file_exists($jsPath)) {
                             $jsContent = file_get_contents($jsPath);
+                            
+                            // Dynamically append script to hide Gift Card products outside of the Gift Card page
+                            $hideScript = "\n\n(function() {
+  function hideGiftCardProducts() {
+    if (window.location.pathname.indexOf('/pages/gift-card') !== -1) {
+      return;
+    }
+    var links = document.querySelectorAll('a[href*=\"/products/gym-gift\"], a[href*=\"/products/gift-card\"]');
+    links.forEach(function(link) {
+      var container = link.closest('.grid__item, .product-card, .card, .product-grid-item, li, tr') || link.parentElement;
+      if (container && (container.tagName === 'BODY' || container.tagName === 'HTML' || container.id === 'MainContent' || container.id === 'shopify-section-template__main')) {
+        link.style.setProperty('display', 'none', 'important');
+        return;
+      }
+      if (container && (container.tagName === 'A' || container.tagName === 'SPAN' || container.tagName === 'P')) {
+        container = container.parentElement;
+      }
+      if (container) {
+        container.style.setProperty('display', 'none', 'important');
+      }
+    });
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    hideGiftCardProducts();
+  } else {
+    document.addEventListener('DOMContentLoaded', hideGiftCardProducts);
+  }
+  window.addEventListener('load', function() {
+    hideGiftCardProducts();
+    var observer = new MutationObserver(function() {
+      hideGiftCardProducts();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+})();\n";
+                            $jsContent .= $hideScript;
+
                             $this->api($shop, 'PUT', "themes/{$activeThemeId}/assets.json", [
                                 'asset' => [
                                     'key' => 'assets/cart-customizer.js',
@@ -238,17 +276,38 @@ class ShopifyService
             }
 
             // 1. Check if the Gift Card page exists
-            $pagesResponse = $this->api($shop, 'GET', 'pages.json', ['handle' => 'gift-card']);
+            $pagesResponse = $this->api($shop, 'GET', 'pages.json');
             $pageExists = false;
-            $giftCardPageId = null;
+            $giftCardPageId = $shop->metadata['gift_card_page_id'] ?? null;
             
             if ($pagesResponse->successful()) {
                 $pages = $pagesResponse->json()['pages'] ?? [];
-                foreach ($pages as $page) {
-                    if (($page['handle'] ?? '') === 'gift-card') {
-                        $pageExists = true;
-                        $giftCardPageId = $page['id'] ?? null;
-                        break;
+                
+                // First check by saved metadata ID
+                if ($giftCardPageId) {
+                    $foundSaved = false;
+                    foreach ($pages as $page) {
+                        if ((int) ($page['id'] ?? 0) === (int) $giftCardPageId) {
+                            $pageExists = true;
+                            $foundSaved = true;
+                            break;
+                        }
+                    }
+                    if (!$foundSaved) {
+                        $giftCardPageId = null;
+                    }
+                }
+                
+                // Fallback check by handle/title if not found by ID
+                if (!$pageExists) {
+                    foreach ($pages as $page) {
+                        $handle = $page['handle'] ?? '';
+                        $title = $page['title'] ?? '';
+                        if ($handle === 'gift-card' || str_contains($handle, 'gift-card') || $title === 'Gift Card') {
+                            $pageExists = true;
+                            $giftCardPageId = $page['id'] ?? null;
+                            break;
+                        }
                     }
                 }
             }
@@ -301,6 +360,7 @@ class ShopifyService
             $appUrl = url('/');
             $templatesJson = json_encode($templates);
             $giftCardsJson = json_encode($giftCards);
+            $today = date('Y-m-d');
 
             $bodyHtml = <<<HTML
 <style>
@@ -346,9 +406,14 @@ class ShopifyService
 /* ── Step 1: Delivery Method ── */
 .gc-delivery-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 1rem;
   margin-bottom: 1.5rem;
+}
+@media(max-width: 480px) {
+  .gc-delivery-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .gc-delivery-btn {
   background: #ffffff;
@@ -681,12 +746,6 @@ class ShopifyService
       </svg>
       <span class="gc-delivery-label">Send by email</span>
     </div>
-    <div class="gc-delivery-btn" data-method="post">
-      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z"></path>
-        <path stroke-linecap="round" stroke-linejoin="round" d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-5 0h5"></path>
-      </svg>
-      <span class="gc-delivery-label">Send by post</span>
     </div>
   </div>
 
@@ -737,6 +796,13 @@ class ShopifyService
         <label for="gc-field-email">To. Recipient Email</label>
         <input type="email" id="gc-field-email" class="gc-input" placeholder="recipient@example.com">
         <span class="gc-error-text" id="err-email">Valid Recipient Email is required.</span>
+      </div>
+
+      <!-- Delivered Date (only if Send by email is active) -->
+      <div class="gc-form-group" id="gc-date-group" style="display: none;">
+        <label for="gc-field-date">Selected Delivered Date</label>
+        <input type="date" id="gc-field-date" class="gc-input" value="{$today}" min="{$today}">
+        <span class="gc-error-text" id="err-date">Please select a valid delivery date.</span>
       </div>
 
       <!-- Personal Message -->
@@ -800,10 +866,13 @@ class ShopifyService
         state.selectedDelivery = method;
         
         var emailGroup = document.getElementById('gc-email-group');
+        var dateGroup = document.getElementById('gc-date-group');
         if (method === 'email') {
           emailGroup.style.display = 'flex';
+          dateGroup.style.display = 'flex';
         } else {
           emailGroup.style.display = 'none';
+          dateGroup.style.display = 'none';
         }
         updatePreview();
       });
@@ -1035,7 +1104,7 @@ class ShopifyService
       this.innerText = 'ADDING...';
 
       var props = {
-        'Delivery Method': state.selectedDelivery === 'email' ? 'Send by email' : (state.selectedDelivery === 'print' ? 'Print at home' : 'Send by post'),
+        'Delivery Method': state.selectedDelivery === 'email' ? 'Send by email' : 'Print at home',
         'Template Name': state.selectedTemplateName || 'Default Template',
         'Sender Name': document.getElementById('gc-field-sender').value.trim(),
         'Recipient Name': document.getElementById('gc-field-recipient').value.trim()
@@ -1043,6 +1112,7 @@ class ShopifyService
 
       if (state.selectedDelivery === 'email') {
         props['Recipient Email'] = document.getElementById('gc-field-email').value.trim();
+        props['Scheduled Send Date'] = document.getElementById('gc-field-date').value;
       }
 
       if (state.selectedTemplateRealUrl) {
@@ -1137,6 +1207,25 @@ class ShopifyService
         email.classList.add('invalid');
         isValid = false;
       }
+
+      var dateField = document.getElementById('gc-field-date');
+      var dateVal = dateField.value;
+      if (!dateVal) {
+        document.getElementById('err-date').innerText = 'Please select a valid delivery date.';
+        document.getElementById('err-date').style.display = 'block';
+        dateField.classList.add('invalid');
+        isValid = false;
+      } else {
+        var selDate = new Date(dateVal + 'T00:00:00');
+        var todayDate = new Date();
+        todayDate.setHours(0,0,0,0);
+        if (selDate < todayDate) {
+          document.getElementById('err-date').innerText = 'Selected date cannot be in the past.';
+          document.getElementById('err-date').style.display = 'block';
+          dateField.classList.add('invalid');
+          isValid = false;
+        }
+      }
     }
 
     // Scroll to first invalid field if any
@@ -1184,6 +1273,14 @@ HTML;
                     return;
                 }
                 $giftCardPageId = $pageCreateResponse->json()['page']['id'] ?? null;
+            }
+
+            // Save the page ID to metadata
+            if ($giftCardPageId && ($shop->metadata['gift_card_page_id'] ?? null) !== $giftCardPageId) {
+                $metadata = $shop->metadata ?? [];
+                $metadata['gift_card_page_id'] = $giftCardPageId;
+                $shop->metadata = $metadata;
+                $shop->save();
             }
 
             // 2. Fetch menus via GraphQL
@@ -1336,5 +1433,131 @@ HTML;
             $formatted[] = $formattedItem;
         }
         return $formatted;
+    }
+
+    public function removeStorefrontResources(Shop $shop): void
+    {
+        // 1. Find and delete the Gift Card page
+        try {
+            $giftCardPageId = $shop->metadata['gift_card_page_id'] ?? null;
+            if ($giftCardPageId) {
+                $this->api($shop, 'DELETE', "pages/{$giftCardPageId}.json");
+                \Illuminate\Support\Facades\Log::info("Deleted Gift Card Page by metadata ID [{$giftCardPageId}]");
+            }
+
+            // Fallback sweep: Check if any leftover page matches handle/title and delete it
+            $pagesResponse = $this->api($shop, 'GET', 'pages.json');
+            if ($pagesResponse->successful()) {
+                $pages = $pagesResponse->json()['pages'] ?? [];
+                foreach ($pages as $page) {
+                    $handle = $page['handle'] ?? '';
+                    $title = $page['title'] ?? '';
+                    if ($handle === 'gift-card' || str_contains($handle, 'gift-card') || $title === 'Gift Card') {
+                        $pageId = $page['id'] ?? null;
+                        if ($pageId && (int) $pageId !== (int) $giftCardPageId) {
+                            $this->api($shop, 'DELETE', "pages/{$pageId}.json");
+                            \Illuminate\Support\Facades\Log::info("Deleted Gift Card Page [{$pageId}] (handle: {$handle}, title: {$title})");
+                        }
+                    }
+                }
+            } else {
+                \Illuminate\Support\Facades\Log::error("Failed to fetch pages: status " . $pagesResponse->status() . ", body: " . $pagesResponse->body());
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Error deleting storefront page: ' . $e->getMessage());
+        }
+
+        // 2. Fetch menus and remove the Gift Card menu item
+        try {
+            $graphqlQuery = [
+                'query' => 'query {
+                    menus(first: 20) {
+                        edges {
+                            node {
+                                id
+                                title
+                                handle
+                                items {
+                                    title
+                                    url
+                                    type
+                                    resourceId
+                                    items {
+                                        title
+                                        url
+                                        type
+                                        resourceId
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }'
+            ];
+            
+            $graphqlResponse = $this->api($shop, 'POST', 'graphql.json', $graphqlQuery);
+            if ($graphqlResponse->successful()) {
+                $resData = $graphqlResponse->json();
+                $menus = $resData['data']['menus']['edges'] ?? [];
+                $mainMenu = null;
+                foreach ($menus as $mEdge) {
+                    $mNode = $mEdge['node'] ?? null;
+                    if (!$mNode) continue;
+                    $handle = strtolower($mNode['handle'] ?? '');
+                    $title = strtolower($mNode['title'] ?? '');
+
+                    if (
+                        in_array($handle, ['main-menu', 'main-navigation', 'primary-menu', 'navigation'])
+                        || str_contains($title, 'main')
+                        || str_contains($title, 'navigation')
+                    ) {
+                        $mainMenu = $mNode;
+                        break;
+                    }
+                }
+
+                if ($mainMenu) {
+                    $existingItems = $mainMenu['items'] ?? [];
+                    $hasGiftCardLink = false;
+                    $filteredItems = [];
+                    foreach ($existingItems as $item) {
+                        if (($item['url'] ?? '') === '/pages/gift-card' || strtolower($item['title'] ?? '') === 'gift card') {
+                            $hasGiftCardLink = true;
+                        } else {
+                            $filteredItems[] = $item;
+                        }
+                    }
+
+                    if ($hasGiftCardLink) {
+                        $formattedItems = $this->formatMenuItemsForUpdate($filteredItems);
+                        $updateMutation = [
+                            'query' => 'mutation menuUpdate($id: ID!, $title: String!, $items: [MenuItemUpdateInput!]!) {
+                                menuUpdate(id: $id, title: $title, items: $items) {
+                                    menu {
+                                        id
+                                        title
+                                    }
+                                    userErrors {
+                                        field
+                                        message
+                                    }
+                                }
+                            }',
+                            'variables' => [
+                                'id' => $mainMenu['id'],
+                                'title' => $mainMenu['title'],
+                                'items' => $formattedItems
+                            ]
+                        ];
+                        $this->api($shop, 'POST', 'graphql.json', $updateMutation);
+                        \Illuminate\Support\Facades\Log::info("Removed Gift Card link from main navigation");
+                    }
+                }
+            } else {
+                \Illuminate\Support\Facades\Log::error("Failed to fetch menus: status " . $graphqlResponse->status() . ", body: " . $graphqlResponse->body());
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Error updating navigation menu: ' . $e->getMessage());
+        }
     }
 }
